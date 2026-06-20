@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import re
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable, AsyncIterator
 
@@ -117,8 +118,13 @@ class NotionDestination:
     def is_auth_error(err: BaseException) -> bool:
         """True if err (or anything in its cause chain / ExceptionGroup) is an
         auth failure only a human can fix: the Bearer token was rejected and the
-        refresh chain is broken (refresh token revoked/expired) -> re-bootstrap."""
-        needles = ("401", "unauthorized", "invalid_token", "invalid_grant", "forbidden")
+        refresh chain is broken (refresh token revoked/expired) -> re-bootstrap.
+
+        Status codes are matched with WORD BOUNDARIES, not substrings — a bare
+        `"401" in msg` false-positives on UUIDs/request-ids like `...-401e-...`
+        (which once misclassified a Notion validation_error as an auth failure)."""
+        text_needles = ("unauthorized", "invalid_token", "invalid_grant", "forbidden")
+        code_re = re.compile(r"\b(401|403)\b")
         seen: set[int] = set()
         stack: list[BaseException] = [err]
         while stack:
@@ -127,7 +133,7 @@ class NotionDestination:
                 continue
             seen.add(id(cur))
             msg = str(cur).lower()
-            if any(n in msg for n in needles):
+            if any(n in msg for n in text_needles) or code_re.search(msg):
                 return True
             if isinstance(cur, BaseExceptionGroup):
                 stack.extend(cur.exceptions)
