@@ -17,20 +17,9 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import os
-from pathlib import Path
-
+from durable_sync.env import load_env
 from durable_sync.core import Record
 from durable_sync.connectors.luma import InMemoryLinkStore, LumaDestination
-
-
-def _load_env() -> None:
-    f = Path(__file__).resolve().parent.parent / ".env"
-    if f.exists():
-        for line in f.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 async def _upsert(dest, records, now):
@@ -48,7 +37,7 @@ async def _upsert(dest, records, now):
 
 
 async def main() -> None:
-    _load_env()
+    load_env()
     if not os.environ.get("LUMA_API_KEY"):
         raise SystemExit("LUMA_API_KEY not set — add it to .env first.")
 

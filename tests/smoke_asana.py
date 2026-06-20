@@ -14,22 +14,12 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import os
-from pathlib import Path
 
+from durable_sync.env import load_env
 from durable_sync.core import Record
 from durable_sync.connectors.asana import AsanaDestination
 
 PROJECT_GID = os.environ.get("ASANA_PROJECT_GID", "1215892757246667")
-
-
-def _load_env() -> None:
-    f = Path(__file__).resolve().parent.parent / ".env"
-    if f.exists():
-        for line in f.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 async def _upsert(dest, records, now):
@@ -49,7 +39,7 @@ async def _upsert(dest, records, now):
 
 
 async def main() -> None:
-    _load_env()
+    load_env()
     if not os.environ.get("ASANA_PAT"):
         raise SystemExit("ASANA_PAT not set — create .env with ASANA_PAT=1/... first.")
 

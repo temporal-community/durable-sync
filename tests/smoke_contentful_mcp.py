@@ -15,17 +15,16 @@ from __future__ import annotations
 import asyncio
 import os
 
+from durable_sync.env import load_env
 from durable_sync.connectors.contentful import oauth, store
 from durable_sync.transport.mcp import open_session
 
-ENV = os.environ.get("CONTENTFUL_ENVIRONMENT", "master")
 
-
-async def _probe(access_token: str, space: str, content_type: str | None) -> None:
+async def _probe(access_token: str, space: str, env: str, content_type: str | None) -> None:
     async def token_provider() -> str:
         return access_token
     async with open_session(oauth.MCP_ENDPOINT, token_provider) as s:
-        base = {"spaceId": space, "environmentId": ENV}
+        base = {"spaceId": space, "environmentId": env}
 
         # The server requires this first.
         await s.call("get_initial_context", {})
@@ -42,7 +41,9 @@ async def _probe(access_token: str, space: str, content_type: str | None) -> Non
 
 
 def main() -> None:
+    load_env()
     space = os.environ.get("CONTENTFUL_SPACE_ID")
+    env = os.environ.get("CONTENTFUL_ENVIRONMENT", "master")
     if not space:
         raise SystemExit("Set CONTENTFUL_SPACE_ID (e.g. 0uuz8ydxyd9p) in .env.")
     creds = store.load()
@@ -53,7 +54,7 @@ def main() -> None:
         creds["refresh_token"] = tokens["refresh_token"]
         store.save(creds)
 
-    asyncio.run(_probe(tokens["access_token"], space, os.environ.get("CONTENTFUL_SMOKE_CONTENT_TYPE")))
+    asyncio.run(_probe(tokens["access_token"], space, env, os.environ.get("CONTENTFUL_SMOKE_CONTENT_TYPE")))
     print("CONTENTFUL MCP READ PROBE done ✅ — paste the raw output and we'll finalize parsing.")
 
 

@@ -23,21 +23,11 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import os
-from pathlib import Path
 
+from durable_sync.env import load_env
 from durable_sync.core import Record
 from durable_sync.linkstore import InMemoryLinkStore
 from durable_sync.connectors.contentful import ContentfulDestination
-
-
-def _load_env() -> None:
-    f = Path(__file__).resolve().parent.parent / ".env"
-    if f.exists():
-        for line in f.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 async def _upsert(dest, records, now):
@@ -55,7 +45,7 @@ async def _upsert(dest, records, now):
 
 
 async def main() -> None:
-    _load_env()
+    load_env()
     space = os.environ.get("CONTENTFUL_SPACE_ID")
     content_type = os.environ.get("CONTENTFUL_SMOKE_CONTENT_TYPE")
     title_field = os.environ.get("CONTENTFUL_SMOKE_TITLE_FIELD", "title")
