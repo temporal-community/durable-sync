@@ -18,36 +18,13 @@ import asyncio
 import datetime as dt
 import os
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Protocol
+from typing import Any, AsyncIterator
 
 import httpx
 
 from durable_sync.core import Record, auth_error_in_chain
+from durable_sync.linkstore import LinkStore
 from durable_sync.connectors.luma import api
-
-
-class LinkStore(Protocol):
-    """Durable map of source primary_key -> Luma event id. The app provides this
-    (Luma can't hold the key itself); see the boundary doctrine in CONTRIBUTING.
-    Both methods are async so an implementation can be DB- or workflow-backed."""
-
-    async def get_all(self) -> dict[str, str]: ...
-    async def put(self, primary_key: str, event_id: str) -> None: ...
-
-
-class InMemoryLinkStore:
-    """Dev/test only — NOT durable. Loses its map on restart, which for an FK-less
-    destination means DUPLICATE events after a restart. Never use in production;
-    provide a durable LinkStore (DB/Temporal-backed) instead."""
-
-    def __init__(self) -> None:
-        self._m: dict[str, str] = {}
-
-    async def get_all(self) -> dict[str, str]:
-        return dict(self._m)
-
-    async def put(self, primary_key: str, event_id: str) -> None:
-        self._m[primary_key] = event_id
 
 
 class LumaDestination:

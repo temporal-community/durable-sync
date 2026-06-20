@@ -10,11 +10,8 @@ Requires the `luma` extra:  pip install "durable-sync[luma]"
 """
 from __future__ import annotations
 
-from durable_sync.connectors.luma.destination import (
-    InMemoryLinkStore,
-    LinkStore,
-    LumaDestination,
-)
+from durable_sync.linkstore import InMemoryLinkStore, LinkStore  # re-export for convenience
+from durable_sync.connectors.luma.destination import LumaDestination
 from durable_sync.connectors.luma.source import LumaConfig, LumaEventContext, LumaSource
 
 __all__ = [

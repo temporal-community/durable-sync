@@ -60,6 +60,8 @@ durable_sync/
 ├── temporal_client.py  client with the codec wired in
 ├── auth/oauth/         OAuth-as-a-workflow toolkit (token-owner workflow + flow)
 ├── http.py             shared httpx retry/backoff for REST connectors
+├── linkstore.py        idempotency map (primary_key <-> dest id) for FK-less destinations
+├── route.py            Route = source -> (transform, field ownership) -> destination
 └── connectors/         one subpackage per SYSTEM — source.py and/or destination.py, sharing a client
     ├── content.py      shared neutral column vocabulary for content-style sources
     ├── multi.py        MultiSource — fan several sources onto one worker/bootstrap
@@ -73,10 +75,10 @@ durable_sync/
 
 A connector is grouped by *system*, not direction, because a system is often both a
 source and a destination (read in one route, written in another) and its two sides share
-a client + auth. **Notion** and **Luma** now expose both halves: Notion's source + destination
-share one MCP client + OAuth; Luma's share their REST client. (A system that can't store a
-foreign key on its own objects — like Luma — takes an app-provided `LinkStore` for idempotency;
-see the boundary doctrine in [CONTRIBUTING.md](CONTRIBUTING.md).)
+a client + auth. **Notion**, **Luma**, and **Contentful** now expose both halves, each sharing
+one client + auth across its read and write sides. (A system that can't store a foreign key on
+its own objects — Luma, Contentful — takes an app-provided `LinkStore` for idempotency; see the
+boundary doctrine in [CONTRIBUTING.md](CONTRIBUTING.md).)
 
 ## What's built
 
@@ -86,9 +88,10 @@ see the boundary doctrine in [CONTRIBUTING.md](CONTRIBUTING.md).)
 - [x] OAuth-as-a-workflow toolkit (token-owner workflow, PKCE + dynamic client registration)
 - [x] Notion connector — **source + destination** (workflow-owned OAuth, shared MCP client)
 - [x] Luma connector — **source + destination** (REST; destination uses an app-owned `LinkStore`)
+- [x] Contentful connector — **source + destination** (CDA/CMA read; CMA write, `LinkStore`-keyed)
 - [x] Asana destination (REST + self-serve PAT)
-- [x] GitHub source (parameterized orgs/repos, with an enrichment hook)
-- [x] YouTube / Contentful sources (videos / CMS entries — async httpx, shared backoff)
+- [x] GitHub / YouTube sources (repos / videos — async httpx, shared backoff)
+- [x] `LinkStore` (in-memory + SQLite) for FK-less idempotency; `Route` + field-ownership (two-way scaffolding)
 - [x] `MultiSource` (run several sources on one worker) + shared content-column vocabulary
 - [x] Tests (offline spine smoke via `MemoryDestination`, encode + normalizer unit tests, live smokes)
 

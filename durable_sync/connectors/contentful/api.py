@@ -209,3 +209,52 @@ def _resolve_authors(entry: dict[str, Any], author_index: dict[str, dict[str, An
         if name or email:
             authors.append({"name": name, "email": email})
     return authors
+
+
+# --- write side: CMA only (the Delivery API is read-only) -------------------
+# Verify against the CMA docs — writes are versioned (optimistic locking) and
+# locale-wrapped: https://www.contentful.com/developers/docs/references/content-management-api/
+
+def cma_entries_url(space: ContentfulSpace) -> str:
+    return f"{CMA_BASE_URL}/spaces/{space.space_id}/environments/{space.environment}/entries"
+
+
+async def _cma(client: httpx.AsyncClient, method: str, url: str, *, headers=None, json=None) -> dict[str, Any]:
+    """A CMA call; raise with status text so is_auth_error classifies a 401.
+    The client carries the Bearer + content-type headers (set in connect)."""
+    r = await request_with_retry(client, method, url, headers=headers, json=json)
+    if r.status_code >= 400:
+        raise RuntimeError(f"Contentful {method} {url.rsplit('/', 1)[-1]} -> {r.status_code}: {r.text[:600]}")
+    return r.json() if r.content else {}
+
+
+async def create_entry(
+    client: httpx.AsyncClient, space: ContentfulSpace, content_type: str, fields: dict[str, Any]
+) -> tuple[str, int]:
+    """Create an entry of `content_type`. Returns (entry id, version)."""
+    data = await _cma(client, "POST", cma_entries_url(space),
+                      headers={"X-Contentful-Content-Type": content_type}, json={"fields": fields})
+    sys = data.get("sys", {})
+    return sys.get("id", ""), sys.get("version", 1)
+
+
+async def entry_version(client: httpx.AsyncClient, space: ContentfulSpace, entry_id: str) -> int:
+    """Current sys.version of an entry (needed for the optimistic-locking header)."""
+    data = await _cma(client, "GET", f"{cma_entries_url(space)}/{entry_id}")
+    return data.get("sys", {}).get("version", 0)
+
+
+async def update_entry(
+    client: httpx.AsyncClient, space: ContentfulSpace, entry_id: str, fields: dict[str, Any], *, version: int
+) -> int:
+    """PUT an entry's fields with the version header (optimistic lock). Returns the
+    new version."""
+    data = await _cma(client, "PUT", f"{cma_entries_url(space)}/{entry_id}",
+                      headers={"X-Contentful-Version": str(version)}, json={"fields": fields})
+    return data.get("sys", {}).get("version", version + 1)
+
+
+async def publish_entry(client: httpx.AsyncClient, space: ContentfulSpace, entry_id: str, *, version: int) -> None:
+    """Publish an entry at `version` (else it stays a draft, CMA-only-visible)."""
+    await _cma(client, "PUT", f"{cma_entries_url(space)}/{entry_id}/published",
+               headers={"X-Contentful-Version": str(version)})
