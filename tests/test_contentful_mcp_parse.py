@@ -1,38 +1,47 @@
 """Unit tests for scraping sys.id / sys.version out of Contentful-MCP's
-prose-prefixed pseudo-XML responses (no network). The live shape is confirmed by
-smoke_contentful_mcp_write.py; these guard the parser's tricky parts."""
+prose-prefixed pseudo-XML responses (no network). Fixture is the REAL create_entry
+shape from the live smoke — including the things that broke the first attempt:
+an invalid `<*>` tag, and space/contentType ids that precede the entry's own id."""
 from __future__ import annotations
 
 from durable_sync.connectors.contentful.mcp import entry_id, entry_version_of
 
-# An entity response: the entry's own <sys> has direct id+version; nested
-# space/contentType <sys> have their OWN ids that must NOT be mistaken for it.
-_ENTRY = """Entry created successfully:
-<entry>
+# Verbatim-shaped create_entry response (the space id 0uuz8ydxyd9p appears FIRST,
+# nested in <space><sys>; the entry id lives in the URN; <*> is not valid XML).
+_CREATE = """Entry created successfully:
+<newEntry>
+  <metadata/>
   <sys>
-    <id>ENTRY123</id>
-    <version>3</version>
     <space><sys><type>Link</type><id>0uuz8ydxyd9p</id></sys></space>
+    <id>1xX4aii74Sgo88cy2bQRKN</id>
+    <type>Entry</type>
+    <publishedCounter>0</publishedCounter>
+    <version>1</version>
+    <fieldStatus><*><en-US>draft</en-US></*></fieldStatus>
     <contentType><sys><id>card</id></sys></contentType>
+    <urn>crn:contentful:::content:spaces/0uuz8ydxyd9p/environments/master/entries/1xX4aii74Sgo88cy2bQRKN</urn>
   </sys>
-  <fields><title>x</title></fields>
-</entry>"""
+</newEntry>"""
 
 
-def test_scrapes_entity_id_not_nested_space_or_content_type():
-    assert entry_id(_ENTRY) == "ENTRY123"
-    assert entry_version_of(_ENTRY) == 3
+def test_entry_id_from_urn_not_space_or_content_type():
+    # The bug we fixed: must NOT return the space id (0uuz8ydxyd9p) or content type (card).
+    assert entry_id(_CREATE) == "1xX4aii74Sgo88cy2bQRKN"
 
 
-def test_tolerates_prose_prefix_and_missing():
-    assert entry_id("Created: <entry><sys><id>abc</id></sys></entry>") == "abc"
-    assert entry_id("no xml at all") is None
-    assert entry_version_of("<entry><sys><id>a</id></sys></entry>") is None  # no version present
+def test_version_is_sys_version_not_published_version():
+    assert entry_version_of(_CREATE) == 1
+    assert entry_version_of("<publishedVersion>5</publishedVersion><version>7</version>") == 7
 
 
-def test_regex_fallback_when_xml_unparseable():
-    # Unbalanced/garbled XML -> ET fails -> best-effort regex still finds version.
-    assert entry_version_of("oops <sys><version>7</version> <unclosed>") == 7
+def test_urnless_fallback_uses_id_after_space_close():
+    raw = "<sys><space><sys><id>SPACE</id></sys></space><id>ENTRYID</id></sys>"
+    assert entry_id(raw) == "ENTRYID"   # not SPACE
+
+
+def test_missing_returns_none():
+    assert entry_id("no entry here") is None
+    assert entry_version_of("no version here") is None
 
 
 if __name__ == "__main__":

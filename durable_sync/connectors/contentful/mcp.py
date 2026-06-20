@@ -17,7 +17,6 @@ server requires it first).
 from __future__ import annotations
 
 import re
-import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
@@ -74,41 +73,23 @@ async def open_contentful(
 
 
 # --- response scraping ------------------------------------------------------
-# Contentful's MCP returns prose-prefixed pseudo-XML. We only need two scalars from
-# entity responses: sys.id and sys.version. We strip the prose, wrap to tolerate
-# multiple roots / stray content, and take the FIRST <sys> that has a direct <id>
-# child — that's the entity's own sys (nested space/environment sys come later in
-# document order). Regex fallback if the XML won't parse.
-
-def _entity_sys(raw: str) -> ET.Element | None:
-    start = raw.find("<")
-    if start < 0:
-        return None
-    try:
-        root = ET.fromstring(f"<root>{raw[start:]}</root>")
-    except ET.ParseError:
-        return None
-    for sys in root.iter("sys"):
-        if sys.find("id") is not None:   # direct <id> child => the entity's own sys
-            return sys
-    return None
-
+# Contentful's MCP returns prose-prefixed pseudo-XML, and it is NOT reliably
+# parseable: it contains invalid tags (e.g. `<fieldStatus><*>…`) and unescaped
+# content, so an XML parser chokes. We don't need the whole document — only two
+# scalars — so we scrape them with anchored regexes:
+#   * the entry id from the sys URN (…/entries/<id>), which is unambiguous (the
+#     bare <id> elements are dangerous — space/environment/contentType ids appear
+#     first), with a post-</space> fallback for any URN-less response;
+#   * the version from the lone <version> tag (distinct from <publishedVersion>).
 
 def entry_id(raw: str) -> str | None:
-    sys = _entity_sys(raw)
-    if sys is not None:
-        el = sys.find("id")
-        if el is not None and el.text:
-            return el.text.strip()
-    m = re.search(r"<id>\s*([^<\s]+)\s*</id>", raw)  # best-effort fallback
+    m = re.search(r"/entries/([A-Za-z0-9_-]+)", raw)          # from the sys URN
+    if m:
+        return m.group(1)
+    m = re.search(r"</space>\s*<id>\s*([A-Za-z0-9_-]+)\s*</id>", raw)  # sys order: space, then id
     return m.group(1) if m else None
 
 
 def entry_version_of(raw: str) -> int | None:
-    sys = _entity_sys(raw)
-    if sys is not None:
-        el = sys.find("version")
-        if el is not None and (el.text or "").strip().isdigit():
-            return int(el.text.strip())
-    m = re.search(r"<version>\s*(\d+)\s*</version>", raw)
+    m = re.search(r"<version>\s*(\d+)\s*</version>", raw)     # not <publishedVersion>
     return int(m.group(1)) if m else None
