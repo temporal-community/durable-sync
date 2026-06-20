@@ -15,8 +15,11 @@ TEMPORAL_ADDRESS = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
 TEMPORAL_NAMESPACE = os.environ.get("TEMPORAL_NAMESPACE", "default")
 TEMPORAL_API_KEY = os.environ.get("TEMPORAL_API_KEY")  # set for Temporal Cloud
 
-# Id of the workflow that owns the Notion OAuth token
-# (auth.workflow.OAuthTokenWorkflow, started via connectors.notion.start).
+# Ids of the workflows that own each provider's OAuth token
+# (auth.workflow.OAuthTokenWorkflow, started via connectors.<provider>.start).
 NOTION_AUTH_WORKFLOW_ID = os.environ.get(
     "DURABLE_SYNC_NOTION_AUTH_WORKFLOW_ID", "durable-sync:notion-auth"
+)
+CONTENTFUL_AUTH_WORKFLOW_ID = os.environ.get(
+    "DURABLE_SYNC_CONTENTFUL_AUTH_WORKFLOW_ID", "durable-sync:contentful-auth"
 )

@@ -26,6 +26,7 @@ from durable_sync.linkstore import LinkStore
 from durable_sync.transport.mcp import TokenProvider
 from durable_sync.connectors.contentful.encode import encode_fields
 from durable_sync.connectors.contentful.mcp import ContentfulMcp, open_contentful
+from durable_sync.connectors.contentful.token import current_access_token
 
 log = logging.getLogger("durable_sync.connectors.contentful.mcp_destination")
 
@@ -40,7 +41,7 @@ class ContentfulMcpDestination:
         content_type: str,
         field_map: dict[str, str],
         link_store: LinkStore,
-        token_provider: TokenProvider,
+        token_provider: TokenProvider | None = None,
         environment: str = "master",
         default_locale: str = "en-US",
         create_only_properties: set[str] | None = None,
@@ -54,7 +55,9 @@ class ContentfulMcpDestination:
         self.default_locale = default_locale
         self.create_only_properties = create_only_properties or set()
         self.publish = publish
-        self._token_provider = token_provider
+        # Default: query the workflow that owns the Contentful OAuth token (started
+        # via connectors.contentful.start), so a worker runs unattended.
+        self._token_provider = token_provider or current_access_token
 
     @property
     def configured(self) -> bool:
@@ -72,6 +75,16 @@ class ContentfulMcpDestination:
     @staticmethod
     def is_auth_error(err: BaseException) -> bool:
         return auth_error_in_chain(err)
+
+    # The worker registers these so the Contentful token-owner workflow runs
+    # alongside the sync (same OAuth-as-a-workflow toolkit as Notion).
+    def aux_workflows(self) -> list:
+        from durable_sync.auth.oauth.workflow import OAuthTokenWorkflow
+        return [OAuthTokenWorkflow]
+
+    def aux_activities(self) -> list:
+        from durable_sync.auth.oauth.refresh import refresh_oauth_token
+        return [refresh_oauth_token]
 
 
 class _McpSession:
