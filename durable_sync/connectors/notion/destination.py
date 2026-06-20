@@ -30,8 +30,8 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from durable_sync.core import Record, auth_error_in_chain
-from durable_sync.destinations.notion import oauth
-from durable_sync.destinations.notion.token import current_access_token
+from durable_sync.connectors.notion import oauth
+from durable_sync.connectors.notion.token import current_access_token
 
 _MAX_BODY = 50000          # cap page body length to keep create snappy
 _MAX_429_RETRIES = 6

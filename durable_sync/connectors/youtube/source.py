@@ -22,10 +22,10 @@ import httpx
 from temporalio import activity
 
 from durable_sync.core import Record, SourceSpec
-from durable_sync.sources import content
-from durable_sync.sources.youtube import api
+from durable_sync.connectors import content
+from durable_sync.connectors.youtube import api
 
-log = logging.getLogger("durable_sync.sources.youtube")
+log = logging.getLogger("durable_sync.connectors.youtube")
 
 EnrichHook = Callable[[Record, "YouTubeVideoContext"], Union[Record, Awaitable[Record]]]
 

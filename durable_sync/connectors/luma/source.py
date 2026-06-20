@@ -22,10 +22,10 @@ import httpx
 from temporalio import activity
 
 from durable_sync.core import Record, SourceSpec
-from durable_sync.sources import content
-from durable_sync.sources.luma import api
+from durable_sync.connectors import content
+from durable_sync.connectors.luma import api
 
-log = logging.getLogger("durable_sync.sources.luma")
+log = logging.getLogger("durable_sync.connectors.luma")
 
 # enrich(record, ctx) -> Record (sync) or Awaitable[Record] (async); both ok.
 EnrichHook = Callable[[Record, "LumaEventContext"], Union[Record, Awaitable[Record]]]

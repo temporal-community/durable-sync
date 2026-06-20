@@ -8,6 +8,6 @@ Requires the `youtube` extra:  pip install "durable-sync[youtube]"
 """
 from __future__ import annotations
 
-from durable_sync.sources.youtube.source import YouTubeConfig, YouTubeSource, YouTubeVideoContext
+from durable_sync.connectors.youtube.source import YouTubeConfig, YouTubeSource, YouTubeVideoContext
 
 __all__ = ["YouTubeSource", "YouTubeConfig", "YouTubeVideoContext"]

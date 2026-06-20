@@ -29,9 +29,39 @@ python -m pytest                # unit tests (no network)
 
 ---
 
+## What belongs in durable-sync (the library vs. app boundary)
+
+This question recurs, so here's the doctrine. durable-sync owns **durable, idempotent
+sync mechanism**. Your app owns **domain policy**. The dividing test is *judgment*:
+
+> If producing the answer needs your data or your rules, it's **policy → app**.
+> If it's a mechanism that's the same for everyone, it's **library**.
+
+- **Matching fuzzy identity is always the app's.** "Is GitHub `webchick` the same person
+  as Luma `angie@…` as Contentful `Angie Byron`?" needs your roster and your matching rules
+  (email-then-name, the "Angie vs Angela" problem). The library **never matches** — it has no
+  basis to. Resolve it in an `enrich` / `session_enrich` hook (see [[Add a transformation]]).
+- **Remembering a link the sync itself minted is the library's** — that's just idempotency.
+  When a write creates a row, the sync knows *with certainty* which `primary_key` it came from,
+  so it records that. This is `query_existing_ids` / `external.gid` / the Notion key column today.
+  No judgment involved.
+- **The escape hatch, stated explicitly:** a hook may *write* its resolved answer into any store;
+  the library must never *compute* that answer. Mechanism carries policy's output; it never
+  produces it. (So `primary_key` is an immutable upstream id, **never a name/URL** — names are
+  exactly the fuzzy identity the library refuses to reason about.)
+- **Promotion rule for shared infrastructure:** durable-sync exists because *two* apps shared
+  logic and we extracted it. Hold new shared machinery (e.g. a cross-system entity/correspondence
+  store) in the **app** until a **second** consumer proves it's common — then promote it with a
+  real second use case to shape it, not a guess. One consumer is not yet a library feature.
+
+When unsure, default to the app. It's cheap to promote later and expensive to walk back a
+mechanism that baked in one app's policy.
+
+---
+
 ## Add a Source
 
-Implement the `Source` protocol (`durable_sync/core.py`). Reference: `durable_sync/sources/github`.
+Implement the `Source` protocol (`durable_sync/core.py`). Reference: `durable_sync/connectors/github`.
 
 ```python
 from durable_sync.core import Record, SourceSpec
@@ -58,7 +88,7 @@ class MySource:
 - Keep config **injected**, not hardcoded — see `GitHubConfig` (orgs/topic/maps are passed in,
   not baked into the source).
 - Long fetch? Heartbeat with `activity.heartbeat(...)` guarded by `activity.in_activity()` so
-  the source stays runnable standalone (see `sources/github/source._heartbeat`).
+  the source stays runnable standalone (see `connectors/github/source._heartbeat`).
 - Need enrichment that uses *source internals* (a README, a tarball, org members)? Expose a
   **source-side enrich hook** that hands the app a typed context — see `RepoContext` and
   `GitHubSource(config, enrich=…)`. Don't make the app reach into your private fetchers.
@@ -70,7 +100,7 @@ Wire it in your app's `pipeline.py`: `SOURCE = MySource()`.
 ## Add a Destination
 
 Implement `Destination` + `DestinationSession` (`durable_sync/core.py`). References:
-`destinations/notion` (MCP + workflow-owned OAuth) and `destinations/asana` (REST + PAT) — two
+`connectors/notion` (MCP + workflow-owned OAuth) and `connectors/asana` (REST + PAT) — two
 deliberately different transports/auth, proving the protocol is neither.
 
 ```python
@@ -150,7 +180,7 @@ Auth is per *destination*, and how much it needs depends on the credential:
 - **OAuth-as-an-individual (no admin token)?** Reuse the toolkit in `durable_sync/auth/oauth/` —
   the pure-HTTP flow (discovery/PKCE/DCR/refresh) **plus** `OAuthTokenWorkflow`, which *owns* the
   rotating refresh token and serves access tokens via query (so the secret never enters event
-  history). Bind it like `destinations/notion` does: a thin `oauth.py` (your endpoints), expose
+  history). Bind it like `connectors/notion` does: a thin `oauth.py` (your endpoints), expose
   the workflow via `aux_workflows`/`aux_activities`, and default your `token_provider` to query it.
 - **A genuinely new mechanism with shared machinery?** Add `durable_sync/auth/<mechanism>/`,
   mirroring `auth/oauth/`. (We deliberately don't have an `auth/pat/` — a PAT has nothing to share.)
@@ -208,7 +238,7 @@ in your app.
 - **HTTP fetches should back off, not hammer.** Route REST calls (source or destination) through
   `durable_sync.http.request_with_retry`, which honors `Retry-After` and backs off on `429` / GitHub's
   rate-limited `403`. And don't let an enrichment call fail *silently* — a swallowed error that returns
-  `[]`/`{}` looks like real-but-empty data downstream; `log.warning` first (see `sources/github/api.py`).
+  `[]`/`{}` looks like real-but-empty data downstream; `log.warning` first (see `connectors/github/api.py`).
   (The Notion destination is the exception — MCP surfaces failures as `isError` results, not HTTP
   statuses, so it keeps its own small retry loop.)
 - **Determinism:** no clock/IO/randomness in workflows; use `workflow.now()`. All side effects live in

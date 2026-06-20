@@ -2,8 +2,8 @@
 
 Public API — implement `Source` for your data, `Destination` for your target;
 the spine (entity workflow, idempotent upsert, OAuth refresh, backoff) is
-inherited. See `sources/` (GitHub) and `destinations/` (Notion, Asana) for
-reference implementations.
+inherited. See `connectors/` (one subpackage per system — GitHub/Luma/YouTube/
+Contentful sources, Notion/Asana destinations) for reference implementations.
 """
 from __future__ import annotations
 

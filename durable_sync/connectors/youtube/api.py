@@ -17,7 +17,7 @@ from durable_sync.http import request_with_retry
 
 API = "https://www.googleapis.com/youtube/v3"
 PAGE = 50  # API max
-log = logging.getLogger("durable_sync.sources.youtube")
+log = logging.getLogger("durable_sync.connectors.youtube")
 
 
 async def _get(client: httpx.AsyncClient, api_key: str, path: str, params: dict[str, Any]) -> dict[str, Any]:

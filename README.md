@@ -59,18 +59,21 @@ durable_sync/
 ├── config.py           runtime/connection config
 ├── temporal_client.py  client with the codec wired in
 ├── auth/oauth/         OAuth-as-a-workflow toolkit (token-owner workflow + flow)
-├── http.py             shared httpx retry/backoff for REST sources & destinations
-├── sources/
-│   ├── content.py      shared neutral column vocabulary for content-style sources
-│   ├── multi.py        MultiSource — fan several sources onto one worker/bootstrap
-│   ├── github/         orgs + named repos -> Records, with an enrichment hook
-│   ├── luma/           Luma calendar events (+ host context for the enrich hook)
-│   ├── youtube/        a channel's uploads (inverted-match scan text for enrich)
-│   └── contentful/     entries by content type (CDA preferred, CMA fallback)
-└── destinations/
-    ├── notion/         MCP transport + workflow-owned OAuth
-    └── asana/          direct REST + self-serve PAT
+├── http.py             shared httpx retry/backoff for REST connectors
+└── connectors/         one subpackage per SYSTEM — source.py and/or destination.py, sharing a client
+    ├── content.py      shared neutral column vocabulary for content-style sources
+    ├── multi.py        MultiSource — fan several sources onto one worker/bootstrap
+    ├── github/         source: orgs + named repos -> Records, with an enrichment hook
+    ├── luma/           source: Luma calendar events (+ host context for the enrich hook)
+    ├── youtube/        source: a channel's uploads (inverted-match scan text for enrich)
+    ├── contentful/     source: entries by content type (CDA preferred, CMA fallback)
+    ├── notion/         destination: MCP transport + workflow-owned OAuth
+    └── asana/          destination: direct REST + self-serve PAT
 ```
+
+A connector is grouped by *system*, not direction, because a system is often both a
+source and a destination (read in one route, written in another) and its two sides share
+a client + auth. Today each exposes one half; both halves can live side by side.
 
 ## What's built
 

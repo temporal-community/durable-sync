@@ -25,11 +25,11 @@ import httpx
 from temporalio import activity
 
 from durable_sync.core import Record, SourceSpec
-from durable_sync.sources import content
-from durable_sync.sources.contentful import api
-from durable_sync.sources.contentful.api import ContentfulSpace
+from durable_sync.connectors import content
+from durable_sync.connectors.contentful import api
+from durable_sync.connectors.contentful.api import ContentfulSpace
 
-log = logging.getLogger("durable_sync.sources.contentful")
+log = logging.getLogger("durable_sync.connectors.contentful")
 
 EnrichHook = Callable[[Record, "ContentfulEntryContext"], Union[Record, Awaitable[Record]]]
 

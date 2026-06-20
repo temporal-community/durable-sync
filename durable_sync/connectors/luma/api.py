@@ -18,7 +18,7 @@ BASE_URL = "https://public-api.luma.com/v1"
 LIST_EVENTS_PATH = "/calendar/list-events"
 GET_EVENT_PATH = "/event/get"
 PAGE_LIMIT = 50
-log = logging.getLogger("durable_sync.sources.luma")
+log = logging.getLogger("durable_sync.connectors.luma")
 
 
 def build_headers(api_key: str | None) -> dict[str, str]:

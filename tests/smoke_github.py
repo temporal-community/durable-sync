@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 
-from durable_sync.sources.github import (
+from durable_sync.connectors.github import (
     GitHubConfig,
     GitHubSource,
     RepoContext,

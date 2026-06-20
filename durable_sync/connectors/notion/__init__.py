@@ -10,7 +10,7 @@ Requires the `notion` extra:  pip install "durable-sync[notion]"
 """
 from __future__ import annotations
 
-from durable_sync.destinations.notion.destination import NotionDestination
+from durable_sync.connectors.notion.destination import NotionDestination
 
 __all__ = ["NotionDestination"]
 

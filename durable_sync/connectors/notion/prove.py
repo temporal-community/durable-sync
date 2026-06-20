@@ -1,7 +1,7 @@
 """Headless proof: NO browser. Loads the saved refresh token, mints a fresh
 access token, and uses it to actually talk to the Notion MCP server.
 
-    PYTHONPATH=. python -m durable_sync.destinations.notion.prove
+    PYTHONPATH=. python -m durable_sync.connectors.notion.prove
 
 The de-risking step for the whole architecture: if this works, the Temporal
 auth workflow can do exactly the same on a timer with no human present.
@@ -13,7 +13,7 @@ import asyncio
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from durable_sync.destinations.notion import oauth, store
+from durable_sync.connectors.notion import oauth, store
 
 
 async def _call_mcp(access_token: str) -> list[str]:
@@ -32,7 +32,7 @@ def main() -> None:
     if not creds:
         raise SystemExit(
             f"No credentials at {store.path()}. Run the bootstrap first:\n"
-            f"  PYTHONPATH=. python -m durable_sync.destinations.notion.bootstrap"
+            f"  PYTHONPATH=. python -m durable_sync.connectors.notion.bootstrap"
         )
 
     print("Refreshing access token (headless, no browser)...")

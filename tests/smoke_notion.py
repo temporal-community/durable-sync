@@ -14,8 +14,8 @@ import datetime as dt
 import re
 
 from durable_sync.core import Record
-from durable_sync.destinations.notion import oauth, store
-from durable_sync.destinations.notion.destination import NotionDestination
+from durable_sync.connectors.notion import oauth, store
+from durable_sync.connectors.notion.destination import NotionDestination
 
 DDL = ('CREATE TABLE ('
        '"Name" TITLE, "Repo ID" RICH_TEXT, "Stars" NUMBER, "Last synced" DATE)')

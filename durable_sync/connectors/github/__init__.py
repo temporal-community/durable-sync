@@ -8,14 +8,14 @@ Requires the `github` extra:  pip install "durable-sync[github]"
 """
 from __future__ import annotations
 
-from durable_sync.sources.github.api import (
+from durable_sync.connectors.github.api import (
     build_headers,
     classify,
     fetch_org_members,
     is_member,
     raw_languages,
 )
-from durable_sync.sources.github.source import (
+from durable_sync.connectors.github.source import (
     GitHubConfig,
     GitHubSource,
     RepoContext,

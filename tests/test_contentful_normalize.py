@@ -2,8 +2,8 @@
 client transforms (locale flatten, author resolution, publish state). No network."""
 from __future__ import annotations
 
-from durable_sync.sources.contentful import ContentfulConfig, ContentfulSource
-from durable_sync.sources.contentful import api
+from durable_sync.connectors.contentful import ContentfulConfig, ContentfulSource
+from durable_sync.connectors.contentful import api
 
 
 def _source() -> ContentfulSource:
@@ -51,7 +51,7 @@ def test_no_url_prefix_leaves_url_empty():
 
 
 def test_has_title():
-    from durable_sync.sources.contentful.source import _has_title
+    from durable_sync.connectors.contentful.source import _has_title
     assert _has_title({"fields": {"title": "x"}})
     assert _has_title({"fields": {"name": "x"}})
     assert not _has_title({"fields": {}})

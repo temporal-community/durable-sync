@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 
 from durable_sync.core import Record
-from durable_sync.destinations.asana.destination import AsanaDestination, _encode_task
+from durable_sync.connectors.asana.destination import AsanaDestination, _encode_task
 
 NOW = dt.datetime(2026, 6, 19, 12, 0, tzinfo=dt.timezone.utc)
 

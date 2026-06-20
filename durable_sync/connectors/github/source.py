@@ -18,9 +18,9 @@ import httpx
 from temporalio import activity
 
 from durable_sync.core import Record, SourceSpec
-from durable_sync.sources.github import api
+from durable_sync.connectors.github import api
 
-log = logging.getLogger("durable_sync.sources.github")
+log = logging.getLogger("durable_sync.connectors.github")
 
 # enrich(record, ctx) -> Record (sync) or Awaitable[Record] (async); both ok.
 EnrichHook = Callable[[Record, "RepoContext"], Union[Record, Awaitable[Record]]]

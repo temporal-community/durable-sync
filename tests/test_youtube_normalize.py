@@ -1,7 +1,7 @@
 """Pure unit tests for the YouTube video->Record normalization (no network)."""
 from __future__ import annotations
 
-from durable_sync.sources.youtube import YouTubeConfig, YouTubeSource
+from durable_sync.connectors.youtube import YouTubeConfig, YouTubeSource
 
 
 def _source() -> YouTubeSource:

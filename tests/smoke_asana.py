@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 
 from durable_sync.core import Record
-from durable_sync.destinations.asana import AsanaDestination
+from durable_sync.connectors.asana import AsanaDestination
 
 PROJECT_GID = os.environ.get("ASANA_PROJECT_GID", "1215892757246667")
 

@@ -6,7 +6,7 @@ import asyncio
 import pytest
 
 from durable_sync.core import Record, SourceSpec
-from durable_sync.sources.multi import MultiSource
+from durable_sync.connectors.multi import MultiSource
 
 
 class _Fake:

@@ -8,6 +8,6 @@ Requires the `luma` extra:  pip install "durable-sync[luma]"
 """
 from __future__ import annotations
 
-from durable_sync.sources.luma.source import LumaConfig, LumaEventContext, LumaSource
+from durable_sync.connectors.luma.source import LumaConfig, LumaEventContext, LumaSource
 
 __all__ = ["LumaSource", "LumaConfig", "LumaEventContext"]

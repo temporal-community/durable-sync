@@ -31,7 +31,7 @@ from durable_sync.http import request_with_retry
 CDA_BASE_URL = "https://cdn.contentful.com"
 CMA_BASE_URL = "https://api.contentful.com"
 PAGE_LIMIT = 100
-log = logging.getLogger("durable_sync.sources.contentful")
+log = logging.getLogger("durable_sync.connectors.contentful")
 
 # --- Content-model seam -----------------------------------------------------
 # These field names depend on the Contentful content model, so they live in one

@@ -1,6 +1,6 @@
 """Launch OAuthTokenWorkflow from the credentials bootstrap saved.
 
-    PYTHONPATH=. python -m durable_sync.destinations.notion.start
+    PYTHONPATH=. python -m durable_sync.connectors.notion.start
 
 Reads the bootstrap creds, starts the single long-running auth workflow, and
 hands ownership of the refresh token to it. After this, the worker keeps access
@@ -12,7 +12,7 @@ import asyncio
 
 from durable_sync import config
 from durable_sync.auth.oauth.workflow import AuthParams, OAuthTokenWorkflow
-from durable_sync.destinations.notion import store
+from durable_sync.connectors.notion import store
 from durable_sync.temporal_client import connect
 
 
@@ -21,7 +21,7 @@ async def main() -> None:
     if not creds:
         raise SystemExit(
             f"No credentials at {store.path()}. Run the bootstrap first:\n"
-            f"  PYTHONPATH=. python -m durable_sync.destinations.notion.bootstrap"
+            f"  PYTHONPATH=. python -m durable_sync.connectors.notion.bootstrap"
         )
 
     client = await connect()

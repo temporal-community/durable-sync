@@ -1,6 +1,6 @@
 """One-time interactive OAuth bootstrap. Run once, as yourself, in a browser:
 
-    PYTHONPATH=. python -m durable_sync.destinations.notion.bootstrap
+    PYTHONPATH=. python -m durable_sync.connectors.notion.bootstrap
 
 No workspace admin, no IT ticket: this self-registers an OAuth client (RFC 7591)
 and authorizes as *you*, with *your* Notion permissions. It saves the resulting
@@ -14,7 +14,7 @@ import threading
 import urllib.parse
 import webbrowser
 
-from durable_sync.destinations.notion import oauth, store
+from durable_sync.connectors.notion import oauth, store
 
 _PORT = 8788
 REDIRECT_URI = f"http://localhost:{_PORT}/callback"
@@ -89,7 +89,7 @@ def main() -> None:
     print(
         f"\nSaved credentials to {store.path()}.\n"
         f"Next: prove headless minting with\n"
-        f"  PYTHONPATH=. python -m durable_sync.destinations.notion.prove"
+        f"  PYTHONPATH=. python -m durable_sync.connectors.notion.prove"
     )
 
 

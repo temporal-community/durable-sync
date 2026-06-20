@@ -13,7 +13,7 @@ from durable_sync.http import request_with_retry
 
 GITHUB_API = "https://api.github.com"
 PER_PAGE = 100
-log = logging.getLogger("durable_sync.sources.github")
+log = logging.getLogger("durable_sync.connectors.github")
 
 
 def build_headers(token: str | None, *, user_agent: str = "durable-sync") -> dict[str, str]:

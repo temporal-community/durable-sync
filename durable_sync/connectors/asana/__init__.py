@@ -8,6 +8,6 @@ Requires the `asana` extra:  pip install "durable-sync[asana]"
 """
 from __future__ import annotations
 
-from durable_sync.destinations.asana.destination import AsanaDestination
+from durable_sync.connectors.asana.destination import AsanaDestination
 
 __all__ = ["AsanaDestination"]

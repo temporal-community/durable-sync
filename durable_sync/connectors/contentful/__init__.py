@@ -10,7 +10,7 @@ Requires the `contentful` extra:  pip install "durable-sync[contentful]"
 """
 from __future__ import annotations
 
-from durable_sync.sources.contentful.source import (
+from durable_sync.connectors.contentful.source import (
     ContentfulConfig,
     ContentfulEntryContext,
     ContentfulSource,

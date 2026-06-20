@@ -8,7 +8,7 @@ every destination that delegates to `auth_error_in_chain`.
 from __future__ import annotations
 
 from durable_sync.core import auth_error_in_chain
-from durable_sync.destinations.asana.destination import AsanaDestination
+from durable_sync.connectors.asana.destination import AsanaDestination
 
 
 def test_word_boundary_no_false_positive_on_request_id():

@@ -28,8 +28,8 @@ python -m durable_sync.codec                        # generate a base64 AES-256 
 
 Notion OAuth is a two-step, run-once setup (no admin token needed — authorizes as an individual):
 ```bash
-PYTHONPATH=. python -m durable_sync.destinations.notion.bootstrap   # interactive: discovery/PKCE/DCR -> saves creds locally
-PYTHONPATH=. python -m durable_sync.destinations.notion.start       # hands the refresh token to OAuthTokenWorkflow
+PYTHONPATH=. python -m durable_sync.connectors.notion.bootstrap   # interactive: discovery/PKCE/DCR -> saves creds locally
+PYTHONPATH=. python -m durable_sync.connectors.notion.start       # hands the refresh token to OAuthTokenWorkflow
 ```
 
 Drive/inspect a running entity workflow by id:
@@ -70,7 +70,7 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
   `requests`-based OAuth refresh) can run.
 - **`bootstrap.py`** — `start_sources(SOURCE)` starts one workflow per `spec` with id
   `durable-sync:<spec.key>` using `USE_EXISTING`, so it's idempotent and doubles as a reconcile.
-- **`http.py`** — shared httpx retry/backoff (`request_with_retry`) for REST sources/destinations:
+- **`http.py`** — shared httpx retry/backoff (`request_with_retry`) for REST connectors:
   honors `Retry-After`, backs off on `429` and GitHub's rate-limited `403`. Runs in activities, so
   wall-clock sleeps are fine; sleeps are capped so a long rate-limit window becomes an activity retry.
 - **`temporal_client.py` + `codec.py`** — `connect()` is the single place a client is opened, with
@@ -84,7 +84,7 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
    workflow's `_is_auth_failure` walks the cause chain, sets `paused=True`, and stops the timer loop.
    A human re-authorizes, then sends the `resume` signal to catch up. (`ConfigError` is the other
    non-retryable type; everything else stays retryable/transient.)
-2. **A workflow owns the rotating OAuth refresh token** (`auth/oauth/` + `destinations/notion`). The
+2. **A workflow owns the rotating OAuth refresh token** (`auth/oauth/` + `connectors/notion`). The
    refresh token lives in `OAuthTokenWorkflow` state and serves fresh access tokens via query — so
    refreshes serialize (no rotation race), survive restarts, and the secret never enters event
    history. This is why the encryption codec exists (it encrypts the token in history at rest).
@@ -100,7 +100,7 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
   `401/403` with word boundaries (a bare `"401" in msg` false-positives on UUIDs/request-ids and
   wrongly pauses the workflow) and walks the cause chain + ExceptionGroups. Pass `extra_needles=`
   for service-specific phrasings.
-- **HTTP calls go through `durable_sync.http.request_with_retry`** (REST sources/destinations) — it
+- **HTTP calls go through `durable_sync.http.request_with_retry`** (REST connectors) — it
   honors `Retry-After` and backs off on `429`/rate-limited `403`. Notion is the exception (MCP
   surfaces errors as `isError` results, so it has its own retry loop in `NotionDestination.call`).
 - **Determinism in workflows**: `workflow.now()` not `datetime.now()`; no IO/randomness; all side
@@ -111,7 +111,7 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
 
 ## Sources
 
-`sources/github` is the reference, but `luma`, `youtube`, and `contentful` follow the same shape:
+`connectors/github` is the reference, but `luma`, `youtube`, and `contentful` follow the same shape:
 an injected config dataclass (secrets read from an env var named in the config, never hardcoded), an
 `api.py` of pure async-httpx fetchers + pure transforms, a `source.py` mapping to neutral `Record`s,
 and an optional source-side `enrich` hook handing the app a typed context (raw entry + live client)
@@ -120,8 +120,8 @@ go through `http.request_with_retry`. Contentful has two auth modes (CDA deliver
 CMA PAT fallback, the only mode that sees drafts), selected by which token env var is set.
 
 The content-style sources (luma/youtube/contentful) share one neutral column vocabulary via
-`sources/content.py` (`content_record(...)` + `P_*` constants) so the names live in one place, not
-copy-pasted per source (GitHub opts out — its columns are repo-specific). `sources/multi.py`'s
+`connectors/content.py` (`content_record(...)` + `P_*` constants) so the names live in one place, not
+copy-pasted per source (GitHub opts out — its columns are repo-specific). `connectors/multi.py`'s
 `MultiSource(*sources)` fans several sources onto one worker/bootstrap by namespacing each inner
 spec key as `<source-name>:<key>` and routing `fetch` back by that prefix — use it for a bundle on
 one task queue; use a single source directly otherwise.

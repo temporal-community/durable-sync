@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from durable_sync.sources.luma import LumaSource
+from durable_sync.connectors.luma import LumaSource
 
 _PAST = "2020-01-01T00:00:00Z"
 _FUTURE = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
