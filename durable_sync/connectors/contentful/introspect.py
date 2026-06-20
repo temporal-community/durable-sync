@@ -32,7 +32,17 @@ def _describe(field: dict) -> str:
     return ftype
 
 
+def _load_dotenv() -> None:
+    """Load a local .env (dev convenience), mirroring config.py. No-op if absent."""
+    try:
+        from dotenv import load_dotenv
+    except ModuleNotFoundError:
+        return
+    load_dotenv()
+
+
 def main() -> None:
+    _load_dotenv()
     space = os.environ.get("CONTENTFUL_SPACE_ID")
     env = os.environ.get("CONTENTFUL_ENVIRONMENT", "master")
     cma = os.environ.get("CONTENTFUL_CMA_TOKEN")
