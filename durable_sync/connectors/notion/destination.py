@@ -66,8 +66,12 @@ class NotionDestination:
         session_enrich: SessionEnrich | None = None,
         icon_for: IconFor | None = None,
         pacing_seconds: float = 0.3,
+        resolve_data_source: bool = True,
     ):
+        # `data_source_id` may be a data source id OR a database id/URL — with
+        # resolve_data_source on (default) the latter is resolved automatically.
         self.data_source_id = data_source_id
+        self._resolve_ds = resolve_data_source
         self.title_property = title_property
         self.key_property = key_property
         self.synced_property = synced_property
@@ -95,7 +99,10 @@ class NotionDestination:
     @asynccontextmanager
     async def connect(self) -> AsyncIterator["_NotionSession"]:
         async with mcp.open_session(self._token_provider) as session:
-            yield _NotionSession(session, self)
+            ds = self.data_source_id
+            if self._resolve_ds:
+                ds = await mcp.resolve_data_source_id(session, ds)
+            yield _NotionSession(session, self, data_source_id=ds)
 
     # The worker auto-registers these so the token-owner workflow runs alongside
     # the sync. (Optional hook; destinations without aux work omit it.)
@@ -119,9 +126,10 @@ class NotionDestination:
 class _NotionSession:
     """One open MCP connection. Implements the DestinationSession protocol."""
 
-    def __init__(self, session: NotionMCP, destination: NotionDestination):
+    def __init__(self, session: NotionMCP, destination: NotionDestination, *, data_source_id: str):
         self._mcp = session
         self._destination = destination
+        self._ds = data_source_id          # already resolved (database id -> data source id)
 
     async def call(self, name: str, arguments: dict[str, Any]) -> str:
         return await self._mcp.call(name, arguments)
@@ -132,7 +140,7 @@ class _NotionSession:
         Paginates LIMIT/OFFSET with ORDER BY the key property; unordered OFFSET
         reshuffles under concurrent edits and skips rows -> duplicates, so the
         ORDER BY is REQUIRED."""
-        ds = self._destination.data_source_id
+        ds = self._ds
         key = self._destination.key_property
         PAGE = 100
         mapping: dict[str, str] = {}
@@ -166,7 +174,7 @@ class _NotionSession:
             page["icon"] = icon
         await self.call(
             "notion-create-pages",
-            {"parent": {"data_source_id": self._destination.data_source_id}, "pages": [page]},
+            {"parent": {"data_source_id": self._ds}, "pages": [page]},
         )
         await self._pace()
         return True

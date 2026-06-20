@@ -54,7 +54,11 @@ class NotionSource:
         interval_minutes: int = 30,
         token_provider: TokenProvider | None = None,
         enrich: EnrichHook | None = None,
+        resolve_data_source: bool = True,
+        decode: bool = True,
     ):
+        # `data_source_id` may be a data source id OR a database id/URL — with
+        # resolve_data_source on (default) the latter is resolved automatically.
         self.data_source_id = data_source_id
         # Pagination is LIMIT/OFFSET; ordering by a STABLE column keeps pages from
         # reshuffling under concurrent edits (else a run can skip/dupe rows — self-
@@ -63,6 +67,9 @@ class NotionSource:
         self.interval_minutes = interval_minutes
         self._token_provider = token_provider or current_access_token
         self._enrich = enrich
+        self._resolve_ds = resolve_data_source
+        self._decode = decode
+        self._resolved_ds: str | None = None
 
     def specs(self) -> list[SourceSpec]:
         return [SourceSpec(key=f"ds:{self.data_source_id}", interval_minutes=self.interval_minutes,
@@ -84,6 +91,12 @@ class NotionSource:
         targeted = set(only_items or [])   # page ids for a targeted refresh
         out: list[Record] = []
         async with mcp.open_session(self._token_provider) as session:
+            if self._resolve_ds:
+                if self._resolved_ds is None:
+                    self._resolved_ds = await mcp.resolve_data_source_id(session, ds)
+                    if self._resolved_ds != ds:
+                        log.info("Resolved database %s -> data source %s", ds, self._resolved_ds)
+                ds = self._resolved_ds
             offset = 0
             while True:
                 sql = mcp.query_sql(ds, order_by=self.order_property, limit=_PAGE, offset=offset)
@@ -117,4 +130,7 @@ class NotionSource:
         page_id = mcp.page_id_from_row(row)
         if not page_id:
             return None
-        return Record(primary_key=page_id, properties=mcp.row_columns(row))
+        columns = mcp.row_columns(row)
+        if self._decode:
+            columns = mcp.decode_row(columns)
+        return Record(primary_key=page_id, properties=columns)
