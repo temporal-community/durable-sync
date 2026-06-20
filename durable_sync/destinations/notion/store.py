@@ -1,36 +1,25 @@
-"""Local credential store for the Notion OAuth bootstrap handoff.
+"""Notion binding of the generic creds store (durable_sync.auth.store).
 
-This is the BOOTSTRAP/PROOF persistence only. In the running system the refresh
-token lives in NotionAuthWorkflow's state (durable, single-owner) — but bootstrap
-needs somewhere to hand off the initial token, and prove.py reads it back. File
-is gitignored; never commit it.
+Pins Notion's auth file path; bootstrap/prove/start call load()/save()/path().
 """
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any
 
-_PATH = Path(os.getenv("DURABLE_SYNC_NOTION_AUTH_FILE", ".notion_auth.json"))
+from durable_sync.auth import store as _store
+
+_FILE = os.getenv("DURABLE_SYNC_NOTION_AUTH_FILE", ".notion_auth.json")
 
 
 def load() -> dict[str, Any] | None:
-    if not _PATH.exists():
-        return None
-    return json.loads(_PATH.read_text())
+    return _store.load(_FILE)
 
 
 def save(data: dict[str, Any]) -> None:
-    """Write atomically so a crash mid-write can't corrupt the rotating token."""
-    tmp = _PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    try:
-        tmp.chmod(0o600)
-    except OSError:
-        pass
-    os.replace(tmp, _PATH)
+    _store.save(_FILE, data)
 
 
 def path() -> Path:
-    return _PATH
+    return _store.resolve(_FILE)

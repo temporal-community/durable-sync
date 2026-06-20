@@ -1,4 +1,4 @@
-"""Launch NotionAuthWorkflow from the credentials bootstrap saved.
+"""Launch OAuthTokenWorkflow from the credentials bootstrap saved.
 
     PYTHONPATH=. python -m durable_sync.destinations.notion.start
 
@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 
 from durable_sync import config
+from durable_sync.auth.workflow import AuthParams, OAuthTokenWorkflow
 from durable_sync.destinations.notion import store
-from durable_sync.destinations.notion.auth_workflow import AuthParams, NotionAuthWorkflow
 from durable_sync.temporal_client import connect
 
 
@@ -26,7 +26,7 @@ async def main() -> None:
 
     client = await connect()
     handle = await client.start_workflow(
-        NotionAuthWorkflow.run,
+        OAuthTokenWorkflow.run,
         AuthParams(
             client_id=creds["client_id"],
             token_endpoint=creds["token_endpoint"],
@@ -36,7 +36,7 @@ async def main() -> None:
         task_queue=config.TASK_QUEUE,
     )
     print(
-        f"Started NotionAuthWorkflow (id={handle.id}). It now owns the refresh "
+        f"Started OAuthTokenWorkflow (id={handle.id}). It now owns the refresh "
         f"token and keeps access tokens fresh.\n"
         f"Verify:  temporal workflow query --workflow-id {handle.id} --type get_access_token"
     )

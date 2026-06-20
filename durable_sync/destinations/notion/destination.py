@@ -6,7 +6,7 @@ Merges the two lineages:
     inter-write pacing (ex-devrel-ships).
 
 Auth: the access token comes from `token_provider` (an async () -> str). The
-default queries NotionAuthWorkflow, which owns the rotating refresh token; the
+default queries OAuthTokenWorkflow, which owns the rotating refresh token; the
 token never enters event history. We pass it as a plain `Authorization: Bearer`
 header to the streamable-HTTP transport.
 
@@ -106,12 +106,12 @@ class NotionDestination:
     # The worker auto-registers these so the token-owner workflow runs alongside
     # the sync. (Optional hook; destinations without aux work omit it.)
     def aux_workflows(self) -> list:
-        from durable_sync.destinations.notion.auth_workflow import NotionAuthWorkflow
-        return [NotionAuthWorkflow]
+        from durable_sync.auth.workflow import OAuthTokenWorkflow
+        return [OAuthTokenWorkflow]
 
     def aux_activities(self) -> list:
-        from durable_sync.destinations.notion.refresh import refresh_notion_token
-        return [refresh_notion_token]
+        from durable_sync.auth.refresh import refresh_oauth_token
+        return [refresh_oauth_token]
 
     @staticmethod
     def is_auth_error(err: BaseException) -> bool:

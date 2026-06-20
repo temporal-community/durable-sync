@@ -1,17 +1,18 @@
-"""NotionAuthWorkflow — the entity workflow that owns Notion's OAuth tokens.
+"""OAuthTokenWorkflow — the entity workflow that owns a rotating OAuth refresh
+token (provider-agnostic).
 
 Why a workflow and not a cron job + a file:
 - It's the SINGLE owner of the rotating refresh token, so refreshes are
   serialized by construction — the concurrent-refresh `invalid_grant` race that
-  Notion's OAuth docs warn about simply can't happen.
+  rotating-refresh-token providers warn about can't happen.
 - Its state (the refresh token) is durable across worker restarts.
 - It hands out fresh access tokens via @workflow.query, which is NOT recorded in
-  history — so sync activities fetch a token without it ever touching the event
-  log. (Pair with the encryption codec to protect the token in workflow state.)
+  history — so activities fetch a token without it touching the event log. (Pair
+  with the encryption codec to protect the token in workflow state.)
 
-Bootstrap (notion/bootstrap.py) authorizes interactively once, then a starter
-launches this workflow with the initial refresh token. From then on it runs
-unattended, refreshing ~5 min before each ~1-hour access token expires.
+Start one per provider/account, with the id the destination expects (e.g.
+config.NOTION_AUTH_WORKFLOW_ID). A bootstrap captures the initial refresh token;
+from then on this runs unattended, refreshing ~5 min before expiry.
 """
 from __future__ import annotations
 
@@ -22,14 +23,9 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from durable_sync.destinations.notion.refresh import (
-        RefreshInput,
-        RefreshOutput,
-        refresh_notion_token,
-    )
+    from durable_sync.auth.refresh import RefreshInput, RefreshOutput, refresh_oauth_token
 
-# Refresh this long before the access token's stated expiry, to avoid handing out
-# a token that expires mid-request.
+# Refresh this long before the access token's stated expiry.
 _REFRESH_SKEW = timedelta(minutes=5)
 # Continue-as-new after this many refreshes to keep event history small.
 _REFRESHES_BEFORE_CONTINUE = 24
@@ -45,7 +41,7 @@ class AuthParams:
 
 
 @workflow.defn
-class NotionAuthWorkflow:
+class OAuthTokenWorkflow:
     def __init__(self) -> None:
         self._access_token: str = ""
 
@@ -56,7 +52,7 @@ class NotionAuthWorkflow:
 
         while True:
             out: RefreshOutput = await workflow.execute_activity(
-                refresh_notion_token,
+                refresh_oauth_token,
                 RefreshInput(
                     client_id=params.client_id,
                     token_endpoint=params.token_endpoint,
@@ -69,7 +65,6 @@ class NotionAuthWorkflow:
             refresh_token = out.refresh_token  # rotated — keep the newest
             refreshes += 1
 
-            # Roll over to a fresh execution periodically so history stays tiny.
             if refreshes >= _REFRESHES_BEFORE_CONTINUE:
                 workflow.continue_as_new(
                     AuthParams(

@@ -5,7 +5,7 @@
 No workspace admin, no IT ticket: this self-registers an OAuth client (RFC 7591)
 and authorizes as *you*, with *your* Notion permissions. It saves the resulting
 refresh token + client_id locally (see store.py) so the headless path (prove.py,
-then NotionAuthWorkflow) can mint access tokens unattended.
+then OAuthTokenWorkflow) can mint access tokens unattended.
 """
 from __future__ import annotations
 
