@@ -99,73 +99,102 @@ class GitHubSource:
                 ))
         return specs
 
-    async def fetch(
-        self, spec: SourceSpec, only_items: list[str] | None = None
-    ) -> list[Record]:
+    async def fetch_page(
+        self, spec: SourceSpec, only_items: list[str] | None, cursor: str | None
+    ) -> tuple[list[Record], str | None]:
+        """ONE page of records + the next cursor (None on the last page). For an org
+        sweep the cursor is the GitHub page number, so the spine bounds history even
+        for a huge org. The named-repos / targeted (`only_items`) paths are small and
+        bounded, so they return everything as a single page (next_cursor=None)."""
         cfg = self._config
         kind = spec.params.get("kind")
         headers = api.build_headers(os.environ.get(cfg.token_env))
 
         async with httpx.AsyncClient(timeout=30) as client:
-            # Member set: one pass, only when an enrich hook can use it.
-            members: set[str] = set()
-            if self._enrich and cfg.member_orgs:
-                for org in cfg.member_orgs:
-                    members |= await api.fetch_org_members(client, org, headers)
+            members = await self._members(client, headers)
+            repos, next_cursor = await self._select_repos_page(
+                client, headers, spec, kind, only_items, cursor)
+            records = await self._records_for_repos(client, headers, repos, members)
 
-            repos = await self._select_repos(client, headers, spec, kind, only_items)
+        log.info("Fetched %d records for %s (cursor=%s -> %s)", len(records), spec.key, cursor, next_cursor)
+        return records, next_cursor
 
-            out: list[Record] = []
-            seen: set[str] = set()
-            for repo in repos:
-                rid = str(repo["id"])
-                if rid in seen:
-                    continue
-                seen.add(rid)
-                # Discovery skips READMEs (hundreds of calls).
-                readme = None if cfg.discovery_mode else await api.fetch_readme(
-                    client, repo["full_name"], headers)
-                lang_bytes = await api.fetch_languages(client, repo["full_name"], headers)
-                authors = await api.fetch_contributors(
-                    client, repo["full_name"], headers, limit=cfg.contributor_limit)
-
-                record = self._base_record(repo, readme, lang_bytes, authors)
-                if self._enrich is not None:
-                    ctx = RepoContext(
-                        raw_repo=repo, readme=readme, language_bytes=lang_bytes,
-                        authors=authors, members=members, client=client, headers=headers,
-                    )
-                    result = self._enrich(record, ctx)
-                    record = await result if inspect.isawaitable(result) else result
-                out.append(record)
-                _heartbeat(repo["full_name"])
-
-        log.info("Fetched %d records for %s", len(out), spec.key)
-        return out
+    async def fetch(
+        self, spec: SourceSpec, only_items: list[str] | None = None
+    ) -> list[Record]:
+        """Whole unit as one list — drains fetch_page. Convenience for standalone /
+        non-Temporal callers; the spine drives fetch_page page-by-page instead."""
+        records: list[Record] = []
+        cursor: str | None = None
+        while True:
+            page, cursor = await self.fetch_page(spec, only_items, cursor)
+            records.extend(page)
+            if cursor is None:
+                return records
 
     # --- internals ---------------------------------------------------------
 
-    async def _select_repos(self, client, headers, spec, kind, only_items) -> list[dict]:
-        if only_items:
-            repos: list[dict] = []
-            for full in only_items:
-                repo = await api.get_repo(client, full, headers)
-                if repo is None:
-                    continue
-                if kind == "org" and not self._passes_gate(repo):
-                    continue
-                repos.append(repo)
-            return repos
+    async def _members(self, client, headers) -> set[str]:
+        """Org member logins for the enrich hook — only when a hook can use them.
+        Re-fetched per page in the paged path (activities are stateless); members
+        change rarely and member_orgs is opt-in, so the extra calls are acceptable."""
+        members: set[str] = set()
+        if self._enrich and self._config.member_orgs:
+            for org in self._config.member_orgs:
+                members |= await api.fetch_org_members(client, org, headers)
+        return members
+
+    async def _records_for_repos(self, client, headers, repos, members) -> list[Record]:
+        cfg = self._config
+        out: list[Record] = []
+        seen: set[str] = set()
+        for repo in repos:
+            rid = str(repo["id"])
+            if rid in seen:  # de-dupe within the page (cross-page dups resolve to
+                continue     # updates in the idempotent upsert, so per-page is enough)
+            seen.add(rid)
+            # Discovery skips READMEs (hundreds of calls).
+            readme = None if cfg.discovery_mode else await api.fetch_readme(
+                client, repo["full_name"], headers)
+            lang_bytes = await api.fetch_languages(client, repo["full_name"], headers)
+            authors = await api.fetch_contributors(
+                client, repo["full_name"], headers, limit=cfg.contributor_limit)
+
+            record = self._base_record(repo, readme, lang_bytes, authors)
+            if self._enrich is not None:
+                ctx = RepoContext(
+                    raw_repo=repo, readme=readme, language_bytes=lang_bytes,
+                    authors=authors, members=members, client=client, headers=headers,
+                )
+                result = self._enrich(record, ctx)
+                record = await result if inspect.isawaitable(result) else result
+            out.append(record)
+            _heartbeat(repo["full_name"])
+        return out
+
+    async def _select_repos_page(
+        self, client, headers, spec, kind, only_items, cursor
+    ) -> tuple[list[dict], str | None]:
+        if only_items:  # targeted refresh — bounded, one page (gate org repos)
+            return await self._repos_by_name(client, headers, only_items, gate=(kind == "org")), None
         if kind == "org":
-            all_repos = await api.fetch_org_repos(
-                client, spec.params.get("org", ""), headers, per_page=self._config.per_page)
-            return [r for r in all_repos if self._passes_gate(r)]
-        # named repos — included by virtue of being named
-        repos = []
-        for full in spec.params.get("repos", []):
+            page = int(cursor) if cursor else 1
+            batch, has_more = await api.fetch_org_repos_page(
+                client, spec.params.get("org", ""), headers, page=page, per_page=self._config.per_page)
+            gated = [r for r in batch if self._passes_gate(r)]
+            return gated, (str(page + 1) if has_more else None)
+        # named repos — included by virtue of being named, bounded, one page
+        return await self._repos_by_name(client, headers, spec.params.get("repos", []), gate=False), None
+
+    async def _repos_by_name(self, client, headers, names, *, gate: bool) -> list[dict]:
+        repos: list[dict] = []
+        for full in names:
             repo = await api.get_repo(client, full, headers)
-            if repo is not None:
-                repos.append(repo)
+            if repo is None:
+                continue
+            if gate and not self._passes_gate(repo):
+                continue
+            repos.append(repo)
         return repos
 
     def _passes_gate(self, repo: dict) -> bool:

@@ -94,16 +94,29 @@ class ContentfulSource:
             cma_token=os.environ.get(cfg.cma_token_env, ""),
         )
 
-    async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
+    async def fetch_page(
+        self, spec: SourceSpec, only_items: list[str] | None, cursor: str | None
+    ) -> tuple[list[Record], str | None]:
+        """ONE page of entries + next cursor (None on the last page). The cursor
+        carries the frozen window start + the CDA/CMA `skip` offset. A targeted
+        (`only_items`) refresh filters each page to the named ids but still walks
+        the window (Contentful has no cheap by-id batch here), as before."""
         cfg = self._config
         content_type = spec.params["content_type"]
         item_type = spec.params.get("item_type") or cfg.content_types.get(content_type, content_type)
         space = self._space()
-        after_iso = (datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)).isoformat()
         targeted = set(only_items or [])
 
+        if cursor is None:
+            after_iso = (datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)).isoformat()
+            skip = 0
+        else:
+            c = content.unpack_cursor(cursor)
+            after_iso, skip = c["after"], c["skip"]
+
         async with httpx.AsyncClient(timeout=30) as client:
-            pairs = await api.iter_entries(client, space, content_type, after_iso)
+            pairs, next_skip = await api.iter_entries_page(
+                client, space, content_type, after_iso, skip=skip)
             out: list[Record] = []
             for entry, authors in pairs:
                 source_id = entry.get("sys", {}).get("id", "")
@@ -120,8 +133,19 @@ class ContentfulSource:
                 out.append(record)
                 _heartbeat(source_id)
 
-        log.info("Fetched %d Contentful %s entries for %s", len(out), content_type, spec.key)
-        return out
+        next_cursor = content.pack_cursor(after=after_iso, skip=next_skip) if next_skip is not None else None
+        log.info("Fetched %d Contentful %s entries for %s (skip=%s)", len(out), content_type, spec.key, skip)
+        return out, next_cursor
+
+    async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
+        """Whole window as one list — drains fetch_page (standalone/non-Temporal)."""
+        records: list[Record] = []
+        cursor: str | None = None
+        while True:
+            page, cursor = await self.fetch_page(spec, only_items, cursor)
+            records.extend(page)
+            if cursor is None:
+                return records
 
     def _to_record(self, entry: dict, item_type: str, authors: list[dict]) -> Record:
         """Map one Contentful entry (+ resolved authors) to a neutral Record. Pure."""

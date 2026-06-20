@@ -18,6 +18,7 @@ import hashlib
 import os
 import secrets
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -25,21 +26,56 @@ _TIMEOUT = 30
 DEFAULT_CLIENT_NAME = "durable-sync"
 
 
-def discover(base_url: str) -> dict[str, str]:
+def _registrable_domain(host: str) -> str:
+    """Last two labels of a host (heuristic, no PSL): notion.com, contentful.com.
+    Good enough to pin discovered OAuth endpoints to the provider's own domain;
+    the hard guarantee is the https check in _validate_endpoint."""
+    labels = host.split(".")
+    return ".".join(labels[-2:]) if len(labels) >= 2 else host
+
+
+def _validate_endpoint(url: str, base_url: str, *, same_site: bool) -> str:
+    """Reject a discovered OAuth endpoint that could exfiltrate the refresh token.
+
+    We POST the refresh token to whatever the discovery documents name, on every
+    refresh, unattended — so a tampered/compromised discovery response must not be
+    able to point us at an attacker host. Enforce https always; when `same_site`
+    (the default), also require the same registrable domain as the pinned base URL.
+    Providers whose authorization server is on a different domain pass same_site=False."""
+    parts = urlsplit(url)
+    if parts.scheme != "https":
+        raise ValueError(f"Refusing non-https OAuth endpoint from discovery: {url!r}")
+    if same_site:
+        base_host = urlsplit(base_url).hostname or ""
+        host = parts.hostname or ""
+        if _registrable_domain(host) != _registrable_domain(base_host):
+            raise ValueError(
+                f"Discovered OAuth endpoint {host!r} is off-domain from {base_host!r}; "
+                f"refusing (pass same_site=False if this provider's auth server is "
+                f"intentionally on another domain)."
+            )
+    return url
+
+
+def discover(base_url: str, *, same_site: bool = True) -> dict[str, str]:
     """Two-step OAuth discovery (RFC 9728 protected-resource -> RFC 8414 AS
     metadata) against `base_url`. Returns authorization/token/registration
-    endpoints."""
+    endpoints. Every discovered endpoint is validated (https + same-domain) before
+    return, because the token endpoint later receives the refresh token unattended
+    (see _validate_endpoint)."""
     pr = requests.get(f"{base_url}/.well-known/oauth-protected-resource", timeout=_TIMEOUT)
     pr.raise_for_status()
-    auth_server = pr.json()["authorization_servers"][0]
+    auth_server = _validate_endpoint(
+        pr.json()["authorization_servers"][0], base_url, same_site=same_site
+    )
 
     md = requests.get(f"{auth_server}/.well-known/oauth-authorization-server", timeout=_TIMEOUT)
     md.raise_for_status()
     data = md.json()
     return {
-        "authorization_endpoint": data["authorization_endpoint"],
-        "token_endpoint": data["token_endpoint"],
-        "registration_endpoint": data["registration_endpoint"],
+        "authorization_endpoint": _validate_endpoint(data["authorization_endpoint"], base_url, same_site=same_site),
+        "token_endpoint": _validate_endpoint(data["token_endpoint"], base_url, same_site=same_site),
+        "registration_endpoint": _validate_endpoint(data["registration_endpoint"], base_url, same_site=same_site),
     }
 
 

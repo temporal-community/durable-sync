@@ -231,10 +231,12 @@ in your app.
 - **Signal handlers must never raise.** A throwing handler *poisons the workflow task* (it re-fails
   forever). Keep them trivial (flip a flag), and tolerate stray payloads (`def resume(self, *_)`).
 - **`is_auth_error` must be precise — don't hand-roll it.** Delegate to `core.auth_error_in_chain`,
-  which matches status codes with word boundaries: a bare `"401" in msg` false-positives on
-  UUIDs/request-ids like `…-401e-…` and will wrongly pause a workflow. (Both reference destinations
-  re-rolled this and drifted — Asana lost the word-boundary check *and* the `403` case — which is why
-  it's now one shared matcher.)
+  and raise HTTP failures as `core.DestinationHTTPError(status_code, msg)` so classification keys on
+  the numeric status, **not** on the response body. (The matcher only word-boundary-scans the *text*
+  for a code when no `status_code` is present — a fallback; otherwise a 422/500 whose body contains a
+  standalone `403` would wrongly pause the workflow. A bare `"401" in msg` also false-positives on
+  UUIDs/request-ids like `…-401e-…`.) Both reference destinations re-rolled this and drifted — Asana
+  lost the word-boundary check *and* the `403` case — which is why it's now one shared matcher.
 - **HTTP fetches should back off, not hammer.** Route REST calls (source or destination) through
   `durable_sync.http.request_with_retry`, which honors `Retry-After` and backs off on `429` / GitHub's
   rate-limited `403`. And don't let an enrichment call fail *silently* — a swallowed error that returns
@@ -243,7 +245,47 @@ in your app.
   statuses, so it keeps its own small retry loop.)
 - **Determinism:** no clock/IO/randomness in workflows; use `workflow.now()`. All side effects live in
   activities.
-- **Records pass through workflow history** — fine at tens/hundreds; batch if a source grows into many
-  thousands.
+- **Records pass through workflow history** — the spine paginates + chunks (≤`_SYNC_CHUNK_SIZE` per
+  upsert) so payloads stay under Temporal's 2MB limit. A small source can just implement `fetch()`
+  (one page); a large one should implement the optional `fetch_page(spec, only_items, cursor) ->
+  (records, next_cursor)` so the **fetch** result is bounded too, not just the upsert.
+- **Evolving the long-lived entity workflows is a redeploy hazard.** `SourceSyncWorkflow` /
+  `OAuthTokenWorkflow` run for days between continue-as-new, so a deploy spans live histories. Any
+  change to the *shape/order* of commands in a run loop (add/remove/reorder an activity call, change
+  `_SYNC_CHUNK_SIZE`) will cause non-determinism errors on replay. Either gate the change behind
+  `workflow.patched("...")`, or opt into Worker Versioning by setting `DURABLE_SYNC_BUILD_ID` (the
+  worker then pins workflows to their build and new code only affects new/continued runs). Local/dev
+  runs leave it unset and stay unversioned.
 - **Never auto-delete.** Sync only ever creates/updates rows it fetched; rows it didn't fetch are left
   untouched (so hand-added metadata and out-of-scope rows survive).
+
+## Scaling (and when to reach past the built-in paging)
+
+The spine already bounds Temporal history for large sources: a source implements
+`fetch_page(spec, only_items, cursor) -> (records, next_cursor)` and the workflow drives it
+page-by-page, upserting each page (chunked to ≤`_SYNC_CHUNK_SIZE`) before fetching the next — so no
+single payload approaches the 2MB limit. All four shipped connectors do this; `fetch()` is just a
+drain over `fetch_page` for standalone use. **This is the right tool up to ~hundreds of thousands of
+records per unit.**
+
+It has two deliberate limits, both inherent to processing one unit inside one workflow run:
+
+1. **Serial.** Pages are fetched and synced one after another — wall-clock scales with the page count.
+   There's no cross-page parallelism.
+2. **One run per sweep.** A full sweep happens within a single `_run_once`; continue-as-new only
+   fires *between* runs. A sweep with a very large number of pages accumulates that many activity
+   events in one history (bounded by Temporal's ~50k-event limit) before it rolls.
+
+When a real source needs **parallelism** (sync time matters) or crosses into the **millions** (event-count
+pressure), graduate to a batch framework rather than growing this loop:
+
+> **[batch-orchestra](https://github.com/drewhoskins/batch-orchestra)** — a Temporal library for
+> high-scale batch processing: pipelined pagination (enqueue the next cursor *while* processing the
+> current page → tens-to-hundreds of pages in flight) plus continue-as-new *during* the batch, so it
+> stays under the event limit at millions of items.
+
+The integration seam is already in place: our `fetch_page(cursor) -> (records, next_cursor)` maps
+almost 1:1 onto batch-orchestra's page/cursor model, so adopting it is a localized change to
+`_run_once` (swap the serial page-loop for a batch-orchestra run driven by the same `fetch_page`) — not
+a connector rewrite. Don't add the dependency pre-emptively; reach for it when a source actually hits
+that tier.

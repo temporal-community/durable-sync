@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from durable_sync.core import DestinationHTTPError
 from durable_sync.http import request_with_retry
 
 BASE_URL = "https://public-api.luma.com/v1"
@@ -25,27 +26,40 @@ def build_headers(api_key: str | None) -> dict[str, str]:
     return {"x-luma-api-key": api_key or "", "Accept": "application/json"}
 
 
+async def list_event_entries_page(
+    client: httpx.AsyncClient, headers: dict, after_iso: str, *,
+    cursor: str | None = None, page_limit: int = PAGE_LIMIT,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """ONE page of raw Luma event entries on/after `after_iso`. Returns
+    (entries, next_cursor) where next_cursor is Luma's pagination_cursor for the
+    next page, or None when there are no more — the cursor the spine threads
+    through `LumaSource.fetch_page`. `list-events` does NOT include hosts."""
+    params: dict[str, Any] = {"after": after_iso, "pagination_limit": page_limit}
+    if cursor:
+        params["pagination_cursor"] = cursor
+    r = await request_with_retry(
+        client, "GET", f"{BASE_URL}{LIST_EVENTS_PATH}", headers=headers, params=params
+    )
+    r.raise_for_status()
+    data = r.json()
+    entries = data.get("entries", data.get("events", []))
+    next_cursor = data.get("next_cursor") if data.get("has_more") else None
+    return entries, next_cursor
+
+
 async def list_event_entries(
     client: httpx.AsyncClient, headers: dict, after_iso: str, *, page_limit: int = PAGE_LIMIT
 ) -> list[dict[str, Any]]:
-    """Raw Luma event entries on/after `after_iso`, paginating transparently.
-    `list-events` does NOT include hosts — fetch those per event (see below)."""
+    """All raw Luma event entries on/after `after_iso` — drains
+    list_event_entries_page. For non-Temporal callers; the spine pages directly."""
     entries: list[dict[str, Any]] = []
     cursor: str | None = None
     while True:
-        params: dict[str, Any] = {"after": after_iso, "pagination_limit": page_limit}
-        if cursor:
-            params["pagination_cursor"] = cursor
-        r = await request_with_retry(
-            client, "GET", f"{BASE_URL}{LIST_EVENTS_PATH}", headers=headers, params=params
-        )
-        r.raise_for_status()
-        data = r.json()
-        entries.extend(data.get("entries", data.get("events", [])))
-        if not data.get("has_more"):
-            break
-        cursor = data.get("next_cursor")
-    return entries
+        batch, cursor = await list_event_entries_page(
+            client, headers, after_iso, cursor=cursor, page_limit=page_limit)
+        entries.extend(batch)
+        if cursor is None:
+            return entries
 
 
 async def get_event(client: httpx.AsyncClient, headers: dict, api_id: str) -> dict[str, Any] | None:
@@ -90,7 +104,7 @@ async def _write(client: httpx.AsyncClient, path: str, payload: dict[str, Any]) 
     The client carries the x-luma-api-key header (set in connect)."""
     r = await request_with_retry(client, "POST", f"{BASE_URL}{path}", json=payload)
     if r.status_code >= 400:
-        raise RuntimeError(f"Luma POST {path} -> {r.status_code}: {r.text[:600]}")
+        raise DestinationHTTPError(r.status_code, f"Luma POST {path} -> {r.status_code}: {r.text[:600]}")
     return r.json() if r.content else {}
 
 

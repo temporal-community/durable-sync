@@ -25,7 +25,7 @@ from typing import Any, Awaitable, Callable, AsyncIterator
 
 import httpx
 
-from durable_sync.core import Record, auth_error_in_chain
+from durable_sync.core import DestinationHTTPError, Record, auth_error_in_chain
 from durable_sync.http import request_with_retry
 
 ASANA_API = "https://app.asana.com/api/1.0"
@@ -111,7 +111,9 @@ class _AsanaSession:
             max_attempts=_MAX_RETRIES, base_delay=_BACKOFF_BASE_SECONDS,
         )
         if r.status_code >= 400:
-            raise RuntimeError(f"Asana {method} {path} -> {r.status_code}: {r.text[:600]}")
+            raise DestinationHTTPError(
+                r.status_code, f"Asana {method} {path} -> {r.status_code}: {r.text[:600]}"
+            )
         return r.json() if r.content else {}
 
     async def query_existing_ids(self) -> dict[str, str]:

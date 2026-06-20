@@ -73,22 +73,34 @@ async def get_repo(client: httpx.AsyncClient, full_name: str, headers: dict) -> 
     return r.json()
 
 
+async def fetch_org_repos_page(
+    client: httpx.AsyncClient, org: str, headers: dict, *, page: int, per_page: int = PER_PAGE
+) -> tuple[list[dict], bool]:
+    """ONE page of an org's public repos. Returns (batch, has_more). The page number
+    is the pagination cursor the spine threads through `GitHubSource.fetch_page`, so
+    the fetch result never passes through workflow history as one oversized payload.
+    Caller applies inclusion gating. Ordered by full_name (stable across pages)."""
+    r = await request_with_retry(
+        client, "GET", f"{GITHUB_API}/orgs/{org}/repos",
+        headers=headers,
+        params={"per_page": per_page, "page": page, "type": "public", "sort": "full_name"},
+    )
+    r.raise_for_status()
+    batch = r.json()
+    return batch, len(batch) == per_page
+
+
 async def fetch_org_repos(
     client: httpx.AsyncClient, org: str, headers: dict, *, per_page: int = PER_PAGE
 ) -> list[dict]:
-    """All public repos in an org (paginated). Caller applies inclusion gating."""
+    """All public repos in an org — drains fetch_org_repos_page. For non-Temporal
+    callers (an enrich hook, a script); the spine uses the paged form directly."""
     repos: list[dict] = []
     page = 1
     while True:
-        r = await request_with_retry(
-            client, "GET", f"{GITHUB_API}/orgs/{org}/repos",
-            headers=headers,
-            params={"per_page": per_page, "page": page, "type": "public", "sort": "full_name"},
-        )
-        r.raise_for_status()
-        batch = r.json()
+        batch, has_more = await fetch_org_repos_page(client, org, headers, page=page, per_page=per_page)
         repos.extend(batch)
-        if len(batch) < per_page:
+        if not has_more:
             return repos
         page += 1
 

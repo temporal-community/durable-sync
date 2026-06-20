@@ -72,7 +72,13 @@ class YouTubeSource:
         return [SourceSpec(key=f"channel:{ch}", interval_minutes=self._config.interval_minutes,
                            params={"channel": ch})]
 
-    async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
+    async def fetch_page(
+        self, spec: SourceSpec, only_items: list[str] | None, cursor: str | None
+    ) -> tuple[list[Record], str | None]:
+        """ONE page of videos + next cursor (None on the last page). The cursor
+        carries the frozen window start, the resolved uploads playlist (so we don't
+        re-resolve the channel each page), and YouTube's pageToken. A targeted
+        (`only_items`) refresh is bounded, so it returns a single page."""
         cfg = self._config
         api_key = os.environ.get(cfg.token_env, "")
         channel = spec.params.get("channel", cfg.channel)
@@ -80,10 +86,21 @@ class YouTubeSource:
         async with httpx.AsyncClient(timeout=30) as client:
             if only_items:
                 videos = await api.videos_by_id(client, api_key, only_items)
+                next_cursor = None
             else:
-                after_iso = (datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)).isoformat()
-                playlist = await api.uploads_playlist(client, api_key, channel)
-                videos = await api.list_videos(client, api_key, playlist, after_iso)
+                if cursor is None:
+                    after_iso = (datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)).isoformat()
+                    playlist = await api.uploads_playlist(client, api_key, channel)
+                    page_token = None
+                else:
+                    c = content.unpack_cursor(cursor)
+                    after_iso, playlist, page_token = c["after"], c["playlist"], c["token"]
+                videos, next_token = await api.list_videos_page(
+                    client, api_key, playlist, after_iso, page_token=page_token)
+                next_cursor = (
+                    content.pack_cursor(after=after_iso, playlist=playlist, token=next_token)
+                    if next_token else None
+                )
 
             out: list[Record] = []
             for v in videos:
@@ -97,8 +114,18 @@ class YouTubeSource:
                 out.append(record)
                 _heartbeat(v.get("videoId", ""))
 
-        log.info("Fetched %d YouTube videos for %s", len(out), spec.key)
-        return out
+        log.info("Fetched %d YouTube videos for %s (cursor=%s)", len(out), spec.key, cursor)
+        return out, next_cursor
+
+    async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
+        """Whole window as one list — drains fetch_page (standalone/non-Temporal)."""
+        records: list[Record] = []
+        cursor: str | None = None
+        while True:
+            page, cursor = await self.fetch_page(spec, only_items, cursor)
+            records.extend(page)
+            if cursor is None:
+                return records
 
     def _to_record(self, v: dict) -> Record:
         """Map one video to a neutral Record. Pure (no IO)."""

@@ -79,9 +79,20 @@ class _LumaSession:
         return await self._d.link_store.get_all()
 
     async def create(self, record: Record, synced_at: dt.datetime) -> bool:
+        # Luma assigns the id server-side and exposes no client-id / idempotency-key
+        # and no field to hold our key — so, unlike Contentful (deterministic PUT
+        # id), create here is at-least-once: if the worker dies between the remote
+        # create and link_store.put, a retry creates a SECOND event. Mitigations: a
+        # DURABLE LinkStore (so the link survives restarts) shrinks the window to
+        # just an in-flight crash; and we fail loudly (below) instead of silently
+        # returning success when no id came back, which would duplicate every sync.
         event_id = await api.create_event(self._client, _encode_event(self._d, record))
-        if event_id:
-            await self._d.link_store.put(record.primary_key, event_id)
+        if not event_id:
+            raise RuntimeError(
+                f"Luma create for primary_key {record.primary_key!r} returned no event "
+                "id; cannot store the idempotency link (would duplicate on retry)"
+            )
+        await self._d.link_store.put(record.primary_key, event_id)
         await self._pace()
         return True
 

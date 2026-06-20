@@ -14,9 +14,25 @@ resolution) still lives in that source — that's real variation, not duplicatio
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from durable_sync.core import Record
+
+
+# --- paging cursor (shared by the windowed content sources) -----------------
+# Each content source paginates a rolling time window, so its `fetch_page` cursor
+# carries the window start (`after`, frozen on the first page so all pages query
+# the same window) plus whatever native pagination token the API uses (Luma's
+# next_cursor, YouTube's pageToken + resolved playlist, Contentful's skip). It's a
+# small JSON blob threaded through Temporal as the spine's opaque cursor string.
+
+def pack_cursor(**fields: Any) -> str:
+    return json.dumps(fields)
+
+
+def unpack_cursor(cursor: str) -> dict[str, Any]:
+    return json.loads(cursor)
 
 # Canonical neutral property names every content-style source emits.
 P_TYPE = "Type"

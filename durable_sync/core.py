@@ -66,8 +66,28 @@ class Source(Protocol):
         self, spec: SourceSpec, only_items: list[str] | None = None
     ) -> list[Record]:
         """Fetch (optionally just `only_items`) and map to Records. All
-        source-specific I/O and field-mapping happens here."""
+        source-specific I/O and field-mapping happens here. Returns the WHOLE unit
+        in one list — simplest, and fine up to ~hundreds of records.
+
+        For a source that can return many thousands, implement `fetch_page` (below)
+        instead: the spine drives it page-by-page so neither the fetch result nor
+        the upsert ever passes through Temporal history as one oversized payload."""
         ...
+
+    # OPTIONAL (checked via getattr by the spine — like the Destination's aux hooks),
+    # but PREFERRED: every shipped connector (GitHub/Luma/YouTube/Contentful)
+    # implements it, with fetch() as a thin drain over it. The spine calls it
+    # repeatedly, threading your cursor, and upserts each page before asking for the
+    # next — bounding history regardless of total size. When present it's used in
+    # preference to fetch(). A genuinely tiny source can skip it and just implement
+    # fetch() (the spine treats that as one page).
+    #
+    #   async def fetch_page(
+    #       self, spec: SourceSpec, only_items: list[str] | None, cursor: str | None
+    #   ) -> tuple[list[Record], str | None]:
+    #       """Return (records_for_this_page, next_cursor). next_cursor is None on
+    #       the last page. `cursor` is None on the first call. Opaque to the spine —
+    #       use whatever your API's pagination token is (offset, page no, cursor)."""
 
 
 class DestinationSession(Protocol):
@@ -129,24 +149,43 @@ class Destination(Protocol):
         ...
 
 
-# Default auth-failure signatures shared by HTTP destinations. Status codes are
-# matched separately (with WORD BOUNDARIES) so a bare "401"/"403" inside a UUID
-# or request-id can't false-positive — the bug that once paused a workflow on a
-# Notion validation_error whose id contained "401e".
+class DestinationHTTPError(RuntimeError):
+    """An HTTP error from a destination, carrying the numeric `status_code`
+    SEPARATELY from the message. `auth_error_in_chain` keys auth-classification on
+    this code rather than scanning the (up-to-600-char) response body — where a
+    stray standalone "403" in an error payload would spuriously pause the workflow.
+    Destinations should raise this (not a bare RuntimeError) for HTTP failures."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+# Default auth-failure signatures shared by HTTP destinations. The numeric code is
+# taken from a DestinationHTTPError.status_code when present; otherwise (a plain
+# exception) we fall back to a WORD-BOUNDARY text match so a bare "401"/"403"
+# inside a UUID or request-id can't false-positive — the bug that once paused a
+# workflow on a Notion validation_error whose id contained "401e".
 _AUTH_TEXT_NEEDLES = ("unauthorized", "forbidden", "invalid_token", "invalid_grant")
+_AUTH_STATUS_CODES = (401, 403)
 _AUTH_CODE_RE = re.compile(r"\b(401|403)\b")
 
 
 def auth_error_in_chain(err: BaseException, *, extra_needles: tuple[str, ...] = ()) -> bool:
     """Shared `is_auth_error` implementation: walk `err`'s cause/context chain and
-    any ExceptionGroup, returning True if any message looks like a human-fixable
-    auth failure (401/403, unauthorized, forbidden, invalid_token/grant). A
-    destination passes `extra_needles` for service-specific phrasings (e.g. Asana's
-    "not authorized"). Pure/deterministic — no I/O — so it's safe to import widely.
+    any ExceptionGroup, returning True if any link looks like a human-fixable auth
+    failure (401/403, unauthorized, forbidden, invalid_token/grant). A destination
+    passes `extra_needles` for service-specific phrasings (e.g. Asana's "not
+    authorized"). Pure/deterministic — no I/O — so it's safe to import widely.
+
+    Classification order per link: (1) a DestinationHTTPError's exact status_code;
+    (2) a text needle; (3) ONLY when the link carries no status_code, a
+    word-boundary 401/403 in the message. (3) is skipped for status-carrying errors
+    so a 422/500 whose body mentions "403" isn't misread as auth.
 
     This lives in the spine so every destination shares ONE correct matcher
-    instead of re-deriving the chain walk + word-boundary code check (which is
-    exactly where Notion and Asana had drifted apart)."""
+    instead of re-deriving the chain walk + code check (which is exactly where
+    Notion and Asana had drifted apart)."""
     needles = _AUTH_TEXT_NEEDLES + tuple(n.lower() for n in extra_needles)
     seen: set[int] = set()
     stack: list[BaseException] = [err]
@@ -155,8 +194,13 @@ def auth_error_in_chain(err: BaseException, *, extra_needles: tuple[str, ...] = 
         if id(cur) in seen:
             continue
         seen.add(id(cur))
+        status = getattr(cur, "status_code", None)
         msg = str(cur).lower()
-        if any(n in msg for n in needles) or _AUTH_CODE_RE.search(msg):
+        if status in _AUTH_STATUS_CODES:
+            return True
+        if any(n in msg for n in needles):
+            return True
+        if status is None and _AUTH_CODE_RE.search(msg):
             return True
         if isinstance(cur, BaseExceptionGroup):
             stack.extend(cur.exceptions)

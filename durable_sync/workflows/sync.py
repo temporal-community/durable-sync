@@ -21,8 +21,14 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 
 with workflow.unsafe.imports_passed_through():
-    from durable_sync.activities import FETCH_SOURCE, SYNC_RECORDS
+    from durable_sync.activities import FETCH_SOURCE, SYNC_RECORDS, FetchPage
     from durable_sync.core import Record, SourceSpec  # noqa: F401  (Record used in annotations)
+
+# Max records handed to one SYNC_RECORDS activity, so a single upsert payload stays
+# well under Temporal's 2MB limit even when a source returns a large page. A
+# CONSTANT (not env-driven) so the command sequence is deterministic across workers
+# and replays; changing it is a workflow-shape change (guard with patching/versioning).
+_SYNC_CHUNK_SIZE = 500
 
 
 def _is_auth_failure(err: BaseException | None) -> bool:
@@ -108,23 +114,39 @@ class SourceSyncWorkflow:
 
     async def _run_once(self, only_items: list[str] | None) -> None:
         try:
-            records: list[Record] = await workflow.execute_activity(
-                FETCH_SOURCE,
-                args=[self._state.spec, only_items],
-                start_to_close_timeout=timedelta(minutes=10),
-                heartbeat_timeout=timedelta(seconds=60),
-                retry_policy=RetryPolicy(maximum_attempts=5),
-            )
-            self._last_stats = await workflow.execute_activity(
-                SYNC_RECORDS,
-                args=[records],
-                start_to_close_timeout=timedelta(minutes=15),
-                heartbeat_timeout=timedelta(seconds=60),
-                retry_policy=RetryPolicy(
-                    maximum_attempts=5,
-                    non_retryable_error_types=["ConfigError", "AuthError"],
-                ),
-            )
+            totals = {"total": 0, "created": 0, "updated": 0, "skipped": 0}
+            cursor: str | None = None
+            # Paged fetch -> chunked upsert, so neither payload through history is
+            # unbounded. Each SYNC_RECORDS re-queries existing ids, so a duplicate
+            # key split across chunks still resolves to an update, not a 2nd create.
+            while True:
+                page: FetchPage = await workflow.execute_activity(
+                    FETCH_SOURCE,
+                    args=[self._state.spec, only_items, cursor],
+                    start_to_close_timeout=timedelta(minutes=10),
+                    heartbeat_timeout=timedelta(seconds=60),
+                    retry_policy=RetryPolicy(maximum_attempts=5),
+                    result_type=FetchPage,
+                )
+                records = page.records
+                for i in range(0, len(records), _SYNC_CHUNK_SIZE):
+                    chunk = records[i:i + _SYNC_CHUNK_SIZE]
+                    stats = await workflow.execute_activity(
+                        SYNC_RECORDS,
+                        args=[chunk],
+                        start_to_close_timeout=timedelta(minutes=15),
+                        heartbeat_timeout=timedelta(seconds=60),
+                        retry_policy=RetryPolicy(
+                            maximum_attempts=5,
+                            non_retryable_error_types=["ConfigError", "AuthError"],
+                        ),
+                    )
+                    for k in totals:
+                        totals[k] += stats.get(k, 0)
+                cursor = page.next_cursor
+                if cursor is None:
+                    break
+            self._last_stats = totals
             self._last_error = None
         except Exception as e:  # noqa: BLE001 - record, don't kill the loop
             self._last_error = str(e)

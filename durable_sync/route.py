@@ -19,7 +19,7 @@ route = one `run_route(...)` (= one worker); compose more by running more.
 from __future__ import annotations
 
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from durable_sync.activities import Transform
 from durable_sync.core import Destination, Record, Source
@@ -28,10 +28,17 @@ from durable_sync.core import Destination, Record, Source
 def restrict_to_owned(owned: set[str]) -> Transform:
     """A transform that drops any property NOT in `owned`, so a route only WRITES
     the fields it owns. Give every field one owning route and two-way sync has no
-    conflicts to resolve. (primary_key is unaffected — it's not a property.)"""
+    conflicts to resolve. (primary_key is unaffected — it's not a property.)
+
+    Returns a NEW Record (dataclasses.replace) rather than mutating in place: the
+    same Record objects flow fetch -> transform -> sync (and are replayed from
+    history), so mutating `record.properties` is a surprising side effect for a
+    function whose contract is Record -> Record."""
     def _t(record: Record) -> Record:
-        record.properties = {k: v for k, v in record.properties.items() if k in owned}
-        return record
+        return replace(
+            record,
+            properties={k: v for k, v in record.properties.items() if k in owned},
+        )
     return _t
 
 

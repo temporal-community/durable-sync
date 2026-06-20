@@ -59,3 +59,27 @@ if __name__ == "__main__":
             fn()
             print(f"  ✓ {name}")
     print("\nAUTH ERROR TESTS PASS ✅")
+
+
+# --- #4: status-code classification beats body-scanning ----------------------
+from durable_sync.core import DestinationHTTPError, auth_error_in_chain
+
+
+def test_status_403_classifies_as_auth():
+    assert auth_error_in_chain(DestinationHTTPError(403, "Asana POST /x -> 403: nope")) is True
+    assert auth_error_in_chain(DestinationHTTPError(401, "unauth")) is True
+
+
+def test_non_auth_status_with_403_in_body_is_not_auth():
+    # A 422/500 whose response body happens to contain "403" must NOT pause the
+    # workflow — the regression #4 fixes.
+    e = DestinationHTTPError(422, "Contentful PUT entries -> 422: rate is 403 per min")
+    assert auth_error_in_chain(e) is False
+    e2 = DestinationHTTPError(500, "server error: code 403 mentioned in trace")
+    assert auth_error_in_chain(e2) is False
+
+
+def test_plain_exception_still_uses_word_boundary_regex():
+    # Exceptions without a status_code keep the legacy text path.
+    assert auth_error_in_chain(RuntimeError("boom 401 boom")) is True
+    assert auth_error_in_chain(RuntimeError("id 401e9f not auth-related")) is False

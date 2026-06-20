@@ -43,41 +43,51 @@ async def uploads_playlist(client: httpx.AsyncClient, api_key: str, channel: str
     return items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
 
-async def list_videos(client: httpx.AsyncClient, api_key: str, playlist: str, after_iso: str) -> list[dict[str, Any]]:
-    """Videos published on/after `after_iso`, newest first (with view counts). The
-    uploads playlist is reverse-chronological, so we stop once we pass the window."""
+async def list_videos_page(
+    client: httpx.AsyncClient, api_key: str, playlist: str, after_iso: str, *, page_token: str | None = None
+) -> tuple[list[dict[str, Any]], str | None]:
+    """ONE page of videos published on/after `after_iso` (with view counts), plus
+    the next pageToken or None. The uploads playlist is reverse-chronological, so we
+    stop (next=None) once a video predates the window — the cursor the spine threads
+    through `YouTubeSource.fetch_page`."""
     after = parse_ts(after_iso)
+    params: dict[str, Any] = {"part": "snippet,contentDetails", "playlistId": playlist, "maxResults": PAGE}
+    if page_token:
+        params["pageToken"] = page_token
+    data = await _get(client, api_key, "playlistItems", params)
+
+    metas: list[dict[str, Any]] = []
+    stop = False
+    for it in data.get("items", []):
+        sn, cd = it.get("snippet", {}), it.get("contentDetails", {})
+        vid = cd.get("videoId")
+        pub = cd.get("videoPublishedAt") or sn.get("publishedAt")
+        if not vid or not pub:
+            continue
+        if parse_ts(pub) < after:
+            stop = True
+            break
+        metas.append({"videoId": vid, "title": sn.get("title", ""),
+                      "description": sn.get("description", ""), "publishedAt": pub})
+
+    views = await view_counts(client, api_key, [m["videoId"] for m in metas]) if metas else {}
+    for m in metas:
+        m["viewCount"] = views.get(m["videoId"])
+
+    next_token = None if stop else (data.get("nextPageToken") or None)
+    return metas, next_token
+
+
+async def list_videos(client: httpx.AsyncClient, api_key: str, playlist: str, after_iso: str) -> list[dict[str, Any]]:
+    """All videos on/after `after_iso` — drains list_videos_page. Non-Temporal
+    callers; the spine pages directly."""
     out: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
-        params: dict[str, Any] = {"part": "snippet,contentDetails", "playlistId": playlist, "maxResults": PAGE}
-        if page_token:
-            params["pageToken"] = page_token
-        data = await _get(client, api_key, "playlistItems", params)
-
-        metas: list[dict[str, Any]] = []
-        stop = False
-        for it in data.get("items", []):
-            sn, cd = it.get("snippet", {}), it.get("contentDetails", {})
-            vid = cd.get("videoId")
-            pub = cd.get("videoPublishedAt") or sn.get("publishedAt")
-            if not vid or not pub:
-                continue
-            if parse_ts(pub) < after:
-                stop = True
-                break
-            metas.append({"videoId": vid, "title": sn.get("title", ""),
-                          "description": sn.get("description", ""), "publishedAt": pub})
-
-        views = await view_counts(client, api_key, [m["videoId"] for m in metas]) if metas else {}
-        for m in metas:
-            m["viewCount"] = views.get(m["videoId"])
-            out.append(m)
-
-        page_token = None if stop else data.get("nextPageToken")
-        if not page_token:
-            break
-    return out
+        metas, page_token = await list_videos_page(client, api_key, playlist, after_iso, page_token=page_token)
+        out.extend(metas)
+        if page_token is None:
+            return out
 
 
 async def videos_by_id(client: httpx.AsyncClient, api_key: str, ids: list[str]) -> list[dict[str, Any]]:

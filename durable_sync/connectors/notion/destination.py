@@ -34,6 +34,9 @@ from durable_sync.connectors.notion.client import NotionMCP, TokenProvider
 from durable_sync.connectors.notion.token import current_access_token
 
 _MAX_BODY = 50000          # cap page body length to keep create snappy
+_MAX_TEXT = 2000           # Notion's hard per-rich_text limit; a longer value is
+                           # rejected by the API and the whole record silently
+                           # fails every sync, so the destination truncates.
 
 # Optional hooks (app-supplied), kept out of the generic core:
 # TokenProvider is imported from client.py (shared with the source).
@@ -239,7 +242,11 @@ class _NotionSession:
                 if val:  # multi-selects are JSON arrays; options must pre-exist
                     out[_key(name, dest)] = json.dumps(list(val))
             else:
-                out[_key(name, dest)] = str(val)
+                # Notion rejects any rich_text/title over 2000 chars; a long
+                # value (e.g. a verbose repo description) would 400 and the record
+                # would silently fail to sync every run. Truncate as a backstop —
+                # the destination owns wire limits (per the core contract).
+                out[_key(name, dest)] = str(val)[:_MAX_TEXT]
         # Sync heartbeat: "Last synced" is a DATE column -> stamp the UTC date.
         if dest.synced_property:
             out[f"date:{dest.synced_property}:start"] = synced_at.date().isoformat()

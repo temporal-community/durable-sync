@@ -26,6 +26,7 @@ from typing import Any
 
 import httpx
 
+from durable_sync.core import DestinationHTTPError
 from durable_sync.http import request_with_retry
 
 CDA_BASE_URL = "https://cdn.contentful.com"
@@ -58,48 +59,65 @@ def _entries_url(base: str, space: ContentfulSpace) -> str:
     return f"{base}/spaces/{space.space_id}/environments/{space.environment}/entries"
 
 
-async def iter_entries(
-    client: httpx.AsyncClient, space: ContentfulSpace, content_type: str, after_iso: str
-) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-    """(entry, authors) for one content type, updated on/after `after_iso`.
-    `authors` is a (possibly empty) list of {name, email}. Routes to the CMA
-    fallback only when no CDA token is configured."""
+async def iter_entries_page(
+    client: httpx.AsyncClient, space: ContentfulSpace, content_type: str, after_iso: str, *, skip: int = 0
+) -> tuple[list[tuple[dict[str, Any], list[dict[str, Any]]]], int | None]:
+    """ONE page of (entry, authors) for a content type, updated on/after `after_iso`.
+    Returns (pairs, next_skip) where next_skip is the offset for the next page or
+    None when exhausted — the cursor the spine threads through
+    `ContentfulSource.fetch_page`. Routes to the CMA fallback only without a CDA token."""
     if space.delivery_token:
-        return await _iter_cda(client, space, content_type, after_iso)
+        return await _cda_page(client, space, content_type, after_iso, skip)
     if space.cma_token:
-        return await _iter_cma(client, space, content_type, after_iso)
+        return await _cma_page(client, space, content_type, after_iso, skip)
     raise RuntimeError(
         "Contentful: set a delivery token (preferred) or a CMA token "
         "(ContentfulConfig.delivery_token_env / cma_token_env)."
     )
 
 
-# --- CDA (Delivery API) -----------------------------------------------------
-
-async def _iter_cda(client, space, content_type, after_iso):
+async def iter_entries(
+    client: httpx.AsyncClient, space: ContentfulSpace, content_type: str, after_iso: str
+) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+    """All (entry, authors) for a content type — drains iter_entries_page. For
+    non-Temporal callers; the spine pages directly."""
     out: list[tuple[dict, list[dict]]] = []
     skip = 0
     while True:
-        params: dict[str, Any] = {
-            "content_type": content_type,
-            # Window on UPDATED-at, not created-at: catches entries recently
-            # published (publishing bumps updatedAt, even for old entries) AND
-            # recently-edited drafts. Overlap is idempotent-safe.
-            "sys.updatedAt[gte]": after_iso,
-            "order": "-sys.updatedAt",
-            "limit": PAGE_LIMIT,
-            "skip": skip,
-            "include": 1,  # pull linked author entries into `includes`
-        }
-        data = await _get(client, CDA_BASE_URL, space, space.delivery_token, params)
-        items = data.get("items", [])
-        author_index = _index_includes(data)
-        for entry in items:
-            entry["_published"] = True  # CDA only ever returns published entries
-            out.append((entry, _resolve_authors(entry, author_index)))
-        skip += len(items)
-        if not items or skip >= data.get("total", 0):
+        pairs, next_skip = await iter_entries_page(client, space, content_type, after_iso, skip=skip)
+        out.extend(pairs)
+        if next_skip is None:
             return out
+        skip = next_skip
+
+
+def _next_skip(skip: int, n_items: int, total: int) -> int | None:
+    """Offset for the next page, or None when this page exhausted the result set."""
+    return skip + n_items if (n_items and skip + n_items < total) else None
+
+
+# --- CDA (Delivery API) -----------------------------------------------------
+
+async def _cda_page(client, space, content_type, after_iso, skip):
+    params: dict[str, Any] = {
+        "content_type": content_type,
+        # Window on UPDATED-at, not created-at: catches entries recently published
+        # (publishing bumps updatedAt, even for old entries) AND recently-edited
+        # drafts. Overlap is idempotent-safe.
+        "sys.updatedAt[gte]": after_iso,
+        "order": "-sys.updatedAt",
+        "limit": PAGE_LIMIT,
+        "skip": skip,
+        "include": 1,  # pull linked author entries into `includes`
+    }
+    data = await _get(client, CDA_BASE_URL, space, space.delivery_token, params)
+    items = data.get("items", [])
+    author_index = _index_includes(data)
+    pairs: list[tuple[dict, list[dict]]] = []
+    for entry in items:
+        entry["_published"] = True  # CDA only ever returns published entries
+        pairs.append((entry, _resolve_authors(entry, author_index)))
+    return pairs, _next_skip(skip, len(items), data.get("total", 0))
 
 
 def _index_includes(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -110,30 +128,28 @@ def _index_includes(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 # --- CMA (Management API) fallback ------------------------------------------
 
-async def _iter_cma(client, space, content_type, after_iso):
-    """Like _iter_cda, but the CMA returns drafts + per-locale fields + no link
+async def _cma_page(client, space, content_type, after_iso, skip):
+    """Like _cda_page, but the CMA returns drafts + per-locale fields + no link
     resolution — so flatten locales, mark publish state, and resolve via a person
-    index. We keep drafts: in-process items are still worth indexing."""
+    index. NOTE: the person index is (re)loaded per page since activities are
+    stateless; CDA (the preferred path) avoids this. We keep drafts: in-process
+    items are still worth indexing."""
     person_index = await _load_person_index_cma(client, space)
-    out: list[tuple[dict, list[dict]]] = []
-    skip = 0
-    while True:
-        params: dict[str, Any] = {
-            "content_type": content_type,
-            "sys.updatedAt[gte]": after_iso,
-            "order": "-sys.updatedAt",
-            "limit": PAGE_LIMIT,
-            "skip": skip,
-        }
-        data = await _get(client, CMA_BASE_URL, space, space.cma_token, params)
-        items = data.get("items", [])
-        for raw in items:
-            entry = _flatten_entry(raw, space.default_locale)
-            entry["_published"] = _is_published(raw)
-            out.append((entry, _resolve_authors(entry, person_index)))
-        skip += len(items)
-        if not items or skip >= data.get("total", 0):
-            return out
+    params: dict[str, Any] = {
+        "content_type": content_type,
+        "sys.updatedAt[gte]": after_iso,
+        "order": "-sys.updatedAt",
+        "limit": PAGE_LIMIT,
+        "skip": skip,
+    }
+    data = await _get(client, CMA_BASE_URL, space, space.cma_token, params)
+    items = data.get("items", [])
+    pairs: list[tuple[dict, list[dict]]] = []
+    for raw in items:
+        entry = _flatten_entry(raw, space.default_locale)
+        entry["_published"] = _is_published(raw)
+        pairs.append((entry, _resolve_authors(entry, person_index)))
+    return pairs, _next_skip(skip, len(items), data.get("total", 0))
 
 
 async def _load_person_index_cma(client, space) -> dict[str, dict[str, Any]]:
@@ -224,34 +240,43 @@ async def _cma(client: httpx.AsyncClient, method: str, url: str, *, headers=None
     The client carries the Bearer + content-type headers (set in connect)."""
     r = await request_with_retry(client, method, url, headers=headers, json=json)
     if r.status_code >= 400:
-        raise RuntimeError(f"Contentful {method} {url.rsplit('/', 1)[-1]} -> {r.status_code}: {r.text[:600]}")
+        raise DestinationHTTPError(
+            r.status_code, f"Contentful {method} {url.rsplit('/', 1)[-1]} -> {r.status_code}: {r.text[:600]}"
+        )
     return r.json() if r.content else {}
 
 
-async def create_entry(
-    client: httpx.AsyncClient, space: ContentfulSpace, content_type: str, fields: dict[str, Any]
-) -> tuple[str, int]:
-    """Create an entry of `content_type`. Returns (entry id, version)."""
-    data = await _cma(client, "POST", cma_entries_url(space),
-                      headers={"X-Contentful-Content-Type": content_type}, json={"fields": fields})
-    sys = data.get("sys", {})
-    return sys.get("id", ""), sys.get("version", 1)
+async def entry_version_or_none(
+    client: httpx.AsyncClient, space: ContentfulSpace, entry_id: str
+) -> int | None:
+    """Current sys.version of an entry, or None if it doesn't exist (404). Lets the
+    idempotent upsert decide create-vs-update at a client-chosen id."""
+    r = await request_with_retry(client, "GET", f"{cma_entries_url(space)}/{entry_id}")
+    if r.status_code == 404:
+        return None
+    if r.status_code >= 400:
+        raise DestinationHTTPError(
+            r.status_code, f"Contentful GET {entry_id} -> {r.status_code}: {r.text[:600]}"
+        )
+    return r.json().get("sys", {}).get("version", 0)
 
 
-async def entry_version(client: httpx.AsyncClient, space: ContentfulSpace, entry_id: str) -> int:
-    """Current sys.version of an entry (needed for the optimistic-locking header)."""
-    data = await _cma(client, "GET", f"{cma_entries_url(space)}/{entry_id}")
-    return data.get("sys", {}).get("version", 0)
-
-
-async def update_entry(
-    client: httpx.AsyncClient, space: ContentfulSpace, entry_id: str, fields: dict[str, Any], *, version: int
+async def upsert_entry(
+    client: httpx.AsyncClient, space: ContentfulSpace, entry_id: str,
+    content_type: str, fields: dict[str, Any], *, version: int | None,
 ) -> int:
-    """PUT an entry's fields with the version header (optimistic lock). Returns the
-    new version."""
+    """Idempotent create-or-update at a CLIENT-CHOSEN id via PUT /entries/{id}.
+    `version is None` -> create (sends the content-type header); an int -> update
+    with the optimistic-lock header. Returns the new sys.version. Because the id is
+    deterministic (see encode.deterministic_entry_id), a retried create can't
+    duplicate — it updates the entry the first attempt already made."""
+    headers = (
+        {"X-Contentful-Content-Type": content_type} if version is None
+        else {"X-Contentful-Version": str(version)}
+    )
     data = await _cma(client, "PUT", f"{cma_entries_url(space)}/{entry_id}",
-                      headers={"X-Contentful-Version": str(version)}, json={"fields": fields})
-    return data.get("sys", {}).get("version", version + 1)
+                      headers=headers, json={"fields": fields})
+    return data.get("sys", {}).get("version", (version or 0) + 1)
 
 
 async def publish_entry(client: httpx.AsyncClient, space: ContentfulSpace, entry_id: str, *, version: int) -> None:

@@ -12,6 +12,7 @@ Pairs with durable_sync.auth.oauth (the workflow-owned token) — but takes any
 from __future__ import annotations
 
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Awaitable, Callable
 
@@ -20,6 +21,10 @@ from mcp.client.streamable_http import streamablehttp_client
 
 _MAX_429_RETRIES = 6
 _BACKOFF_BASE_SECONDS = 1.0
+# Word-boundary match so a stray "429" inside an id/count/timestamp in the error
+# body doesn't trigger a pointless backoff loop (same reasoning as the spine's
+# word-boundary 401/403 auth matcher in core.py).
+_RATE_LIMIT_RE = re.compile(r"\b429\b")
 
 TokenProvider = Callable[[], Awaitable[str]]
 
@@ -44,7 +49,7 @@ class McpSession:
                 t for b in result.content if (t := getattr(b, "text", None))
             )
             if getattr(result, "isError", False):
-                if "429" in payload and attempt < _MAX_429_RETRIES - 1:
+                if _RATE_LIMIT_RE.search(payload) and attempt < _MAX_429_RETRIES - 1:
                     await asyncio.sleep(_BACKOFF_BASE_SECONDS * (2 ** attempt))
                     continue
                 raise RuntimeError(f"MCP tool {name!r} returned an error: {payload[:600]}")

@@ -69,7 +69,12 @@ class LumaSource:
         # One calendar per API key -> a single unit of work / entity workflow.
         return [SourceSpec(key="events", interval_minutes=self._config.interval_minutes)]
 
-    async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
+    async def fetch_page(
+        self, spec: SourceSpec, only_items: list[str] | None, cursor: str | None
+    ) -> tuple[list[Record], str | None]:
+        """ONE page of events + next cursor (None on the last page). The cursor
+        carries the frozen window start + Luma's pagination_cursor. A targeted
+        (`only_items`) refresh is bounded, so it returns a single page."""
         cfg = self._config
         headers = api.build_headers(os.environ.get(cfg.token_env))
 
@@ -78,9 +83,17 @@ class LumaSource:
                 entries = [e for e in
                            [await api.get_event(client, headers, api_id) for api_id in only_items]
                            if e is not None]
+                next_cursor = None
             else:
-                after_iso = (datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)).isoformat()
-                entries = await api.list_event_entries(client, headers, after_iso)
+                if cursor is None:
+                    after_iso = (datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)).isoformat()
+                    luma_cursor = None
+                else:
+                    c = content.unpack_cursor(cursor)
+                    after_iso, luma_cursor = c["after"], c["token"]
+                entries, luma_next = await api.list_event_entries_page(
+                    client, headers, after_iso, cursor=luma_cursor)
+                next_cursor = content.pack_cursor(after=after_iso, token=luma_next) if luma_next else None
 
             out: list[Record] = []
             for entry in entries:
@@ -94,8 +107,18 @@ class LumaSource:
                 out.append(record)
                 _heartbeat(api_id)
 
-        log.info("Fetched %d Luma events for %s", len(out), spec.key)
-        return out
+        log.info("Fetched %d Luma events for %s (cursor=%s)", len(out), spec.key, cursor)
+        return out, next_cursor
+
+    async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
+        """Whole window as one list — drains fetch_page (standalone/non-Temporal)."""
+        records: list[Record] = []
+        cursor: str | None = None
+        while True:
+            page, cursor = await self.fetch_page(spec, only_items, cursor)
+            records.extend(page)
+            if cursor is None:
+                return records
 
     def _to_record(self, entry: dict, hosts: list[dict]) -> Record:
         """Map one Luma entry (+ its hosts) to a neutral Record. Pure (no IO)."""

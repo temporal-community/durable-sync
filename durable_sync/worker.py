@@ -16,9 +16,11 @@ the event loop; sync ones run in the pool.
 from __future__ import annotations
 
 import concurrent.futures
+from datetime import timedelta
 
 from temporalio.client import Client
-from temporalio.worker import Worker
+from temporalio.common import VersioningBehavior
+from temporalio.worker import Worker, WorkerDeploymentConfig, WorkerDeploymentVersion
 
 from durable_sync import config
 from durable_sync.activities import make_activities
@@ -64,11 +66,26 @@ def make_worker(
         if max_concurrent_activities is not None:
             extra["max_concurrent_activities"] = max_concurrent_activities
 
+    # Opt-in Worker Versioning (DURABLE_SYNC_BUILD_ID set). PINNED as the default so
+    # the long-lived entity workflows keep running their original code until they
+    # continue-as-new onto a newer build — no non-determinism on redeploy. Unset =
+    # unversioned (the simple local path), unchanged.
+    if config.BUILD_ID:
+        extra["deployment_config"] = WorkerDeploymentConfig(
+            version=WorkerDeploymentVersion(
+                deployment_name=config.DEPLOYMENT_NAME, build_id=config.BUILD_ID
+            ),
+            use_worker_versioning=True,
+            default_versioning_behavior=VersioningBehavior.PINNED,
+        )
+
     return Worker(
         client,
         task_queue=task_queue or config.TASK_QUEUE,
         workflows=workflows,
         activities=activities,
+        # Let in-flight activities finish on SIGTERM/redeploy instead of being cut.
+        graceful_shutdown_timeout=timedelta(seconds=30),
         **extra,
     )
 

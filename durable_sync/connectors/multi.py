@@ -52,10 +52,27 @@ class MultiSource:
             for spec in source.specs()
         ]
 
-    async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
-        """Route to the owning source by the key prefix, restoring the inner key."""
+    def _route(self, spec: SourceSpec) -> tuple[Source, SourceSpec]:
+        """The owning source + the spec with its inner (un-namespaced) key restored."""
         name, _, inner_key = spec.key.partition(_SEP)
         source = self._by_name.get(name)
         if source is None:
             raise ValueError(f"MultiSource: no source named {name!r} for spec key {spec.key!r}")
-        return await source.fetch(replace(spec, key=inner_key), only_items)
+        return source, replace(spec, key=inner_key)
+
+    async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
+        """Route to the owning source by the key prefix, restoring the inner key."""
+        source, inner = self._route(spec)
+        return await source.fetch(inner, only_items)
+
+    async def fetch_page(
+        self, spec: SourceSpec, only_items: list[str] | None, cursor: str | None
+    ) -> tuple[list[Record], str | None]:
+        """Route paging to the owning source. If that source paginates, the bundle
+        does too; if it only implements fetch(), it returns as a single page — so a
+        mixed bundle of paged and whole-list sources all work on one worker."""
+        source, inner = self._route(spec)
+        inner_fetch_page = getattr(source, "fetch_page", None)
+        if callable(inner_fetch_page):
+            return await inner_fetch_page(inner, only_items, cursor)
+        return await source.fetch(inner, only_items), None

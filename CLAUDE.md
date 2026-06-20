@@ -117,7 +117,11 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
   effects in activities.
 - **Never auto-delete.** Sync only creates/updates rows it fetched; rows it didn't fetch are left
   untouched, so hand-added metadata and out-of-scope rows survive.
-- **Records pass through workflow history** — fine at hundreds; batch if a source grows to many thousands.
+- **Records pass through workflow history**, so the spine paginates fetch + chunks the upsert
+  (`_SYNC_CHUNK_SIZE`) to stay under Temporal's 2MB payload limit. Large sources implement the optional
+  `Source.fetch_page(...)` to bound the fetch too; small ones just implement `fetch()`.
+- **Long-lived workflows + redeploys:** changing a run-loop's command shape breaks replay of in-flight
+  histories. Guard with `workflow.patched(...)` or opt into Worker Versioning via `DURABLE_SYNC_BUILD_ID`.
 
 ## Sources
 

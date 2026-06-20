@@ -7,14 +7,18 @@ Writes go through the **CMA** (the Delivery API is read-only), which means:
   * versioned updates (fetch sys.version, send it as the optimistic-lock header),
   * an explicit publish step (else entries stay drafts).
 
-Like Luma, idempotency uses an injected `LinkStore` (primary_key -> entry id):
-the source's neutral property names don't match Contentful's content-model field
-ids and we don't want to assume a field exists to stash a key in, so the
-correspondence lives in the app-owned store (see the CONTRIBUTING doctrine).
+Idempotency: the entry id is a DETERMINISTIC function of the source primary_key
+(`deterministic_entry_id`), and creates go through `PUT /entries/{id}` (Contentful
+lets you choose the id). So a create that's retried after a crash re-derives the
+same id and UPDATES that entry rather than duplicating it — at-least-once safe
+without trusting the LinkStore to have been written. The injected `LinkStore` is
+still used for query_existing_ids (to route known rows straight to update), but it
+is now just an optimization: even an empty/lost store can't cause duplicates.
 
 NOTE: the CMA shape here follows the docs but has not been run against a live
-space — verify field-locale wrapping, versioning, and publish before relying on
-it. The pure encoding (`_encode_fields`) is unit-tested; the HTTP is not.
+space — verify field-locale wrapping, the PUT-with-id create, versioning, and
+publish before relying on it. The pure encoding + id derivation are unit-tested;
+the HTTP request sequence is unit-tested against a fake client but not live.
 
 Requires the `contentful` extra.
 """
@@ -32,7 +36,7 @@ from durable_sync.core import Record, auth_error_in_chain
 from durable_sync.linkstore import LinkStore
 from durable_sync.connectors.contentful import api
 from durable_sync.connectors.contentful.api import ContentfulSpace
-from durable_sync.connectors.contentful.encode import encode_fields
+from durable_sync.connectors.contentful.encode import deterministic_entry_id, encode_fields
 
 _CMA_CONTENT_TYPE = "application/vnd.contentful.management.v1+json"
 
@@ -104,23 +108,29 @@ class _ContentfulSession:
         return await self._d.link_store.get_all()
 
     async def create(self, record: Record, synced_at: dt.datetime) -> bool:
-        fields = _encode_fields(self._d, record)
-        entry_id, version = await api.create_entry(self._client, self._space, self._d.content_type, fields)
-        if entry_id:
-            await self._d.link_store.put(record.primary_key, entry_id)
-            if self._d.publish:
-                await api.publish_entry(self._client, self._space, entry_id, version=version)
+        # Idempotent: the entry id is a pure function of primary_key, so a retried
+        # create (after a crash) re-derives the SAME id and updates the entry the
+        # first attempt made instead of duplicating it. We still record the link so
+        # query_existing_ids routes future syncs straight to update().
+        entry_id = deterministic_entry_id(record.primary_key)
+        await self._upsert(entry_id, record, creating=True)
+        await self._d.link_store.put(record.primary_key, entry_id)
         await self._pace()
         return True
 
     async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> bool:
-        fields = _encode_fields(self._d, record, creating=False)
-        version = await api.entry_version(self._client, self._space, existing_id)
-        new_version = await api.update_entry(self._client, self._space, existing_id, fields, version=version)
-        if self._d.publish:
-            await api.publish_entry(self._client, self._space, existing_id, version=new_version)
+        await self._upsert(existing_id, record, creating=False)
         await self._pace()
         return True
+
+    async def _upsert(self, entry_id: str, record: Record, *, creating: bool) -> None:
+        fields = _encode_fields(self._d, record, creating=creating)
+        version = await api.entry_version_or_none(self._client, self._space, entry_id)
+        new_version = await api.upsert_entry(
+            self._client, self._space, entry_id, self._d.content_type, fields, version=version
+        )
+        if self._d.publish:
+            await api.publish_entry(self._client, self._space, entry_id, version=new_version)
 
     async def _pace(self) -> None:
         if self._d.pacing_seconds > 0:
