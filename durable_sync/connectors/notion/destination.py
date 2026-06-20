@@ -27,18 +27,16 @@ from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable, AsyncIterator
 
 from mcp.client.session import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
 
 from durable_sync.core import Record, auth_error_in_chain
-from durable_sync.connectors.notion import oauth
+from durable_sync.connectors.notion import client as mcp
+from durable_sync.connectors.notion.client import NotionMCP, TokenProvider
 from durable_sync.connectors.notion.token import current_access_token
 
 _MAX_BODY = 50000          # cap page body length to keep create snappy
-_MAX_429_RETRIES = 6
-_BACKOFF_BASE_SECONDS = 1.0
 
 # Optional hooks (app-supplied), kept out of the generic core:
-TokenProvider = Callable[[], Awaitable[str]]
+# TokenProvider is imported from client.py (shared with the source).
 # Runs inside the open MCP session before each write — for DESTINATION-SIDE
 # enrichment that must read Notion (e.g. resolving author handles to a relation).
 # Gets the live session + the record; returns the (possibly mutated) record.
@@ -96,12 +94,8 @@ class NotionDestination:
 
     @asynccontextmanager
     async def connect(self) -> AsyncIterator["_NotionSession"]:
-        token = await self._token_provider()
-        headers = {"Authorization": f"Bearer {token}"}
-        async with streamablehttp_client(oauth.MCP_ENDPOINT, headers=headers) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                yield _NotionSession(session, self)
+        async with mcp.open_session(self._token_provider) as session:
+            yield _NotionSession(session, self)
 
     # The worker auto-registers these so the token-owner workflow runs alongside
     # the sync. (Optional hook; destinations without aux work omit it.)
@@ -125,52 +119,34 @@ class NotionDestination:
 class _NotionSession:
     """One open MCP connection. Implements the DestinationSession protocol."""
 
-    def __init__(self, session: ClientSession, destination: NotionDestination):
-        self._session = session
+    def __init__(self, session: NotionMCP, destination: NotionDestination):
+        self._mcp = session
         self._destination = destination
 
     async def call(self, name: str, arguments: dict[str, Any]) -> str:
-        """Call an MCP tool; raise on error; return concatenated text content.
-
-        Retries with exponential backoff on Notion's 429 (rate limit). MCP reports
-        failures as isError results (NOT exceptions); without surfacing them, a
-        failed write is silently counted a success -> missing rows. Raising lets
-        Temporal retry (the upsert is idempotent, so a retry re-syncs safely)."""
-        for attempt in range(_MAX_429_RETRIES):
-            result = await self._session.call_tool(name, arguments)
-            payload = "\n".join(
-                t for b in result.content if (t := getattr(b, "text", None))
-            )
-            if getattr(result, "isError", False):
-                if "429" in payload and attempt < _MAX_429_RETRIES - 1:
-                    await asyncio.sleep(_BACKOFF_BASE_SECONDS * (2 ** attempt))
-                    continue
-                raise RuntimeError(f"Notion MCP tool {name!r} returned an error: {payload[:600]}")
-            return payload
-        return ""  # unreachable: loop returns or raises
+        return await self._mcp.call(name, arguments)
 
     async def query_existing_ids(self) -> dict[str, str]:
         """{ key-property value -> page id } for rows already in the DB.
 
-        Paginates LIMIT/OFFSET with ORDER BY the key property. Results cap at 100
-        rows; unordered OFFSET reshuffles under concurrent edits and skips rows
-        -> duplicates, so the ORDER BY is REQUIRED."""
+        Paginates LIMIT/OFFSET with ORDER BY the key property; unordered OFFSET
+        reshuffles under concurrent edits and skips rows -> duplicates, so the
+        ORDER BY is REQUIRED."""
         ds = self._destination.data_source_id
         key = self._destination.key_property
         PAGE = 100
         mapping: dict[str, str] = {}
         offset = 0
         while True:
-            sql = (f'SELECT * FROM "collection://{ds}" '
-                   f'ORDER BY "{key}" LIMIT {PAGE} OFFSET {offset}')
+            sql = mcp.query_sql(ds, order_by=key, limit=PAGE, offset=offset)
             raw = await self.call(
                 "notion-query-data-sources",
                 {"data": {"data_source_urls": [f"collection://{ds}"], "query": sql}},
             )
-            rows = _rows_from_result(raw)
+            rows = mcp.rows_from_result(raw)
             for row in rows:
                 kval = str(row.get(key) or "").strip()
-                page_id = _page_id_from_row(row)
+                page_id = mcp.page_id_from_row(row)
                 if kval and page_id:
                     mapping[kval] = page_id
             if len(rows) < PAGE:
@@ -221,7 +197,7 @@ class _NotionSession:
         """Run the destination-side enrich hook (if any). It may return None to
         DROP the record (an out-of-scope filter)."""
         if self._destination._session_enrich is not None:
-            return await self._destination._session_enrich(self._session, record)
+            return await self._destination._session_enrich(self._mcp.session, record)
         return record
 
     def _icon(self, record: Record) -> str | None:
@@ -277,45 +253,3 @@ def _encode_date(val: Any) -> tuple[str, int]:
         return val.isoformat(), 0
     s = str(val)
     return s, (1 if "T" in s else 0)
-
-
-# ---------------------------------------------------------------------------
-# Result parsing (query results come back as JSON or, defensively, markdown)
-# ---------------------------------------------------------------------------
-
-def _rows_from_result(raw: str) -> list[dict[str, Any]]:
-    raw = raw.strip()
-    if not raw:
-        return []
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return _rows_from_markdown(raw)
-    if isinstance(data, list):
-        return [d for d in data if isinstance(d, dict)]
-    if isinstance(data, dict):
-        for key in ("results", "rows", "data"):
-            if isinstance(data.get(key), list):
-                return [d for d in data[key] if isinstance(d, dict)]
-    return []
-
-
-def _rows_from_markdown(raw: str) -> list[dict[str, Any]]:
-    lines = [ln for ln in raw.splitlines() if ln.strip().startswith("|")]
-    if len(lines) < 2:
-        return []
-    headers = [h.strip() for h in lines[0].strip("|").split("|")]
-    rows: list[dict[str, Any]] = []
-    for ln in lines[2:]:
-        cells = [c.strip() for c in ln.strip("|").split("|")]
-        if len(cells) == len(headers):
-            rows.append(dict(zip(headers, cells)))
-    return rows
-
-
-def _page_id_from_row(row: dict[str, Any]) -> str | None:
-    for key in ("id", "page_id", "_id", "url", "page_url"):
-        val = row.get(key)
-        if isinstance(val, str) and val:
-            return val.rsplit("/", 1)[-1].split("?")[0]
-    return None

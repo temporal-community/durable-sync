@@ -42,12 +42,19 @@ def make_worker(
     activities = make_activities(source, destination, transform=transform)
     workflows: list = [SourceSyncWorkflow]
 
-    aux_acts = getattr(destination, "aux_activities", None)
-    if callable(aux_acts):
-        activities = activities + list(aux_acts())
-    aux_wfs = getattr(destination, "aux_workflows", None)
-    if callable(aux_wfs):
-        workflows = workflows + list(aux_wfs())
+    # Aux workflows/activities can come from EITHER side — a destination's auth
+    # workflow (Notion) or a source's (Notion-as-source needs the same OAuth
+    # token workflow). Dedupe by identity so a Notion->Notion route doesn't
+    # register the shared OAuthTokenWorkflow twice (Temporal rejects dupes).
+    for component in (source, destination):
+        aux_acts = getattr(component, "aux_activities", None)
+        if callable(aux_acts):
+            activities = activities + list(aux_acts())
+        aux_wfs = getattr(component, "aux_workflows", None)
+        if callable(aux_wfs):
+            workflows = workflows + list(aux_wfs())
+    activities = list(dict.fromkeys(activities))
+    workflows = list(dict.fromkeys(workflows))
 
     extra: dict = {}
     # Required if ANY activity is sync (e.g. a destination's OAuth refresh). Harmless
