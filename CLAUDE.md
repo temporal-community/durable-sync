@@ -70,6 +70,11 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
   `requests`-based OAuth refresh) can run.
 - **`bootstrap.py`** — `start_sources(SOURCE)` starts one workflow per `spec` with id
   `durable-sync:<spec.key>` using `USE_EXISTING`, so it's idempotent and doubles as a reconcile.
+- **`transport/`** — transport mechanisms, orthogonal to `auth/`: `transport/mcp.py` is the generic
+  MCP session/`call`/tool-listing over streamable-HTTP (Notion + Contentful both ride it — its
+  second consumer is why it was promoted out of `connectors/notion`); REST connectors use `http.py`.
+  A connector composes a transport + an auth mechanism. (`http.py` is the other transport; it can
+  move under `transport/` for symmetry — trivial follow-up.)
 - **`http.py`** — shared httpx retry/backoff (`request_with_retry`) for REST connectors:
   honors `Retry-After`, backs off on `429` and GitHub's rate-limited `403`. Runs in activities, so
   wall-clock sleeps are fine; sleeps are capped so a long rate-limit window becomes an activity retry.

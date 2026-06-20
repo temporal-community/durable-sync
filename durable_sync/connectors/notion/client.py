@@ -1,69 +1,27 @@
-"""Shared Notion-MCP transport — used by BOTH the destination (write) and the
-source (read), since a system's two sides share a client + auth.
+"""Notion-specific MCP helpers — the bits the generic transport can't own:
+Notion's SQL query shape, its collection:// data sources + row parsing, the
+database->data-source resolution, and the value decode that inverts the
+destination's encoding. The generic MCP session/transport now lives in
+durable_sync.transport.mcp (Contentful rides the same transport).
 
-Owns: opening the streamable-HTTP MCP session with a Bearer token, the `call`
-wrapper that turns MCP `isError` results into raised exceptions (with 429
-backoff), and the pure parsers that turn a `notion-query-data-sources` result
-into row dicts. No read/write policy lives here — that's in source.py /
-destination.py.
+Used by BOTH the destination (write) and source (read), sharing one MCP session.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import re
-from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import Any
 
-from mcp.client.session import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-
+from durable_sync.transport.mcp import McpSession, TokenProvider, open_session as _open_session
 from durable_sync.connectors.notion import oauth
 
-_MAX_429_RETRIES = 6
-_BACKOFF_BASE_SECONDS = 1.0
-
-TokenProvider = Callable[[], Awaitable[str]]
+# Back-compat alias: NotionMCP is just the generic session.
+NotionMCP = McpSession
 
 
-class NotionMCP:
-    """One open MCP connection. `.session` is the raw ClientSession (handed to a
-    session_enrich hook); `.call` is the error-surfacing, 429-retrying tool call."""
-
-    def __init__(self, session: ClientSession):
-        self.session = session
-
-    async def call(self, name: str, arguments: dict[str, Any]) -> str:
-        """Call an MCP tool; raise on error; return concatenated text content.
-
-        MCP reports failures as isError results (NOT exceptions); without surfacing
-        them, a failed write is silently counted a success -> missing rows. Raising
-        lets Temporal retry (sync is idempotent, so a retry re-syncs safely).
-        Retries with exponential backoff on Notion's 429 (rate limit)."""
-        for attempt in range(_MAX_429_RETRIES):
-            result = await self.session.call_tool(name, arguments)
-            payload = "\n".join(
-                t for b in result.content if (t := getattr(b, "text", None))
-            )
-            if getattr(result, "isError", False):
-                if "429" in payload and attempt < _MAX_429_RETRIES - 1:
-                    await asyncio.sleep(_BACKOFF_BASE_SECONDS * (2 ** attempt))
-                    continue
-                raise RuntimeError(f"Notion MCP tool {name!r} returned an error: {payload[:600]}")
-            return payload
-        return ""  # unreachable: loop returns or raises
-
-
-@asynccontextmanager
-async def open_session(token_provider: TokenProvider) -> AsyncIterator[NotionMCP]:
-    """Open an authenticated Notion-MCP session. `token_provider` yields a fresh
-    access token (default: a query to the OAuthTokenWorkflow)."""
-    token = await token_provider()
-    headers = {"Authorization": f"Bearer {token}"}
-    async with streamablehttp_client(oauth.MCP_ENDPOINT, headers=headers) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            yield NotionMCP(session)
+def open_session(token_provider: TokenProvider):
+    """Open a Notion-MCP session (the generic transport, pinned to Notion's endpoint)."""
+    return _open_session(oauth.MCP_ENDPOINT, token_provider)
 
 
 def query_sql(data_source_id: str, *, order_by: str | None = None, limit: int = 100, offset: int = 0) -> str:

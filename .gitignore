@@ -22,3 +22,4 @@ env/
 .mypy_cache/
 .ruff_cache/
 .DS_Store
+.contentful_auth.json
