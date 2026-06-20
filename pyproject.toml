@@ -1,0 +1,28 @@
+[project]
+name = "durable-sync"
+version = "0.1.0"
+description = "Durable, idempotent source -> destination sync, built on Temporal. GitHub->Notion is the reference wiring; bring your own source/destination."
+requires-python = ">=3.11"  # BaseExceptionGroup (auth-error taxonomy) is builtin in 3.11+
+dependencies = [
+    "temporalio>=1.7",
+]
+
+[project.optional-dependencies]
+# Each integration pulls only what it needs, so a GitHub->Asana user never
+# installs the Notion MCP SDK, etc.
+notion = ["mcp>=1.2", "requests>=2.31"]   # Notion destination: MCP transport + pure-HTTP OAuth
+github = ["httpx>=0.27"]                   # GitHub source
+asana = ["httpx>=0.27"]                    # Asana destination (direct REST + self-serve PAT)
+crypto = ["cryptography>=42"]              # opt-in payload encryption codec
+dev = ["pytest>=8.0", "python-dotenv>=1.0"]
+all = ["mcp>=1.2", "requests>=2.31", "httpx>=0.27", "cryptography>=42"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["durable_sync*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
