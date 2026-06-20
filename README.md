@@ -73,7 +73,10 @@ durable_sync/
 
 A connector is grouped by *system*, not direction, because a system is often both a
 source and a destination (read in one route, written in another) and its two sides share
-a client + auth. Today each exposes one half; both halves can live side by side.
+a client + auth. **Notion** and **Luma** now expose both halves: Notion's source + destination
+share one MCP client + OAuth; Luma's share their REST client. (A system that can't store a
+foreign key on its own objects — like Luma — takes an app-provided `LinkStore` for idempotency;
+see the boundary doctrine in [CONTRIBUTING.md](CONTRIBUTING.md).)
 
 ## What's built
 
@@ -81,10 +84,11 @@ a client + auth. Today each exposes one half; both halves can live side by side.
 - [x] Generic activities + entity sync workflow + worker/bootstrap
 - [x] Payload encryption codec
 - [x] OAuth-as-a-workflow toolkit (token-owner workflow, PKCE + dynamic client registration)
-- [x] Notion destination (workflow-owned OAuth, Bearer transport, 429 backoff, pacing)
+- [x] Notion connector — **source + destination** (workflow-owned OAuth, shared MCP client)
+- [x] Luma connector — **source + destination** (REST; destination uses an app-owned `LinkStore`)
 - [x] Asana destination (REST + self-serve PAT)
 - [x] GitHub source (parameterized orgs/repos, with an enrichment hook)
-- [x] Luma / YouTube / Contentful sources (events / videos / CMS entries — async httpx, shared backoff)
+- [x] YouTube / Contentful sources (videos / CMS entries — async httpx, shared backoff)
 - [x] `MultiSource` (run several sources on one worker) + shared content-column vocabulary
 - [x] Tests (offline spine smoke via `MemoryDestination`, encode + normalizer unit tests, live smokes)
 

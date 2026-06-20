@@ -75,3 +75,32 @@ async def get_event_hosts(client: httpx.AsyncClient, headers: dict, api_id: str)
         return []
     r.raise_for_status()
     return r.json().get("hosts", [])
+
+
+# --- write side (used by LumaDestination) -----------------------------------
+# Verify paths/payload keys against Luma's docs — the write API evolves:
+# https://docs.luma.com/reference/post_v1-event-create
+
+CREATE_EVENT_PATH = "/event/create"
+UPDATE_EVENT_PATH = "/event/update"
+
+
+async def _write(client: httpx.AsyncClient, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """POST to Luma; raise with status text (so is_auth_error can classify a 401).
+    The client carries the x-luma-api-key header (set in connect)."""
+    r = await request_with_retry(client, "POST", f"{BASE_URL}{path}", json=payload)
+    if r.status_code >= 400:
+        raise RuntimeError(f"Luma POST {path} -> {r.status_code}: {r.text[:600]}")
+    return r.json() if r.content else {}
+
+
+async def create_event(client: httpx.AsyncClient, payload: dict[str, Any]) -> str:
+    """Create an event; return its api_id."""
+    data = await _write(client, CREATE_EVENT_PATH, payload)
+    event = data.get("event", data)
+    return event.get("api_id") or data.get("api_id") or ""
+
+
+async def update_event(client: httpx.AsyncClient, api_id: str, payload: dict[str, Any]) -> None:
+    """Update an existing event in place (idempotency handle = api_id)."""
+    await _write(client, UPDATE_EVENT_PATH, {"api_id": api_id, **payload})
