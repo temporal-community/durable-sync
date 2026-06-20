@@ -67,18 +67,19 @@ def make_activities(
             )
 
         synced_at = dt.datetime.now(dt.timezone.utc)
-        created = updated = 0
+        created = updated = skipped = 0
         try:
             async with destination.connect() as session:
                 existing = await session.query_existing_ids()  # primary_key -> dest id
                 for rec in records:
                     existing_id = existing.get(rec.primary_key)
                     if existing_id:
-                        await session.update(existing_id, rec, synced_at)
-                        updated += 1
+                        wrote = await session.update(existing_id, rec, synced_at)
+                        updated += 1 if wrote else 0
                     else:
-                        await session.create(rec, synced_at)
-                        created += 1
+                        wrote = await session.create(rec, synced_at)
+                        created += 1 if wrote else 0
+                    skipped += 0 if wrote else 1   # dropped by a destination-side filter
                     activity.heartbeat(rec.primary_key)
         except ApplicationError:
             raise
@@ -94,7 +95,7 @@ def make_activities(
                 ) from e
             raise
 
-        stats = {"total": len(records), "created": created, "updated": updated}
+        stats = {"total": len(records), "created": created, "updated": updated, "skipped": skipped}
         activity.logger.info("Sync complete: %s", stats)
         return stats
 

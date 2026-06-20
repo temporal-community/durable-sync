@@ -76,14 +76,17 @@ class DestinationSession(Protocol):
         """{ primary_key -> destination-internal id } for rows already present."""
         ...
 
-    async def create(self, record: Record, synced_at: dt.datetime) -> None:
+    async def create(self, record: Record, synced_at: dt.datetime) -> bool:
         """Insert a new row. `synced_at` is the sync-pass timestamp (a real
-        datetime — the destination formats it however its schema needs)."""
+        datetime — the destination formats it however its schema needs).
+        Returns True if written, False if SKIPPED (e.g. a destination-side enrich
+        hook dropped the record as out-of-scope)."""
         ...
 
-    async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> None:
+    async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> bool:
         """Refresh an existing row, leaving `create_only` properties untouched so
-        human edits to those seeds survive. `synced_at` as in create()."""
+        human edits to those seeds survive. `synced_at` as in create(). Returns
+        True if written, False if skipped."""
         ...
 
 

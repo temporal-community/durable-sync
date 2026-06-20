@@ -42,17 +42,19 @@ class _MemorySession:
         # destination-internal id == primary_key for this trivial store
         return {pk: pk for pk in self._d.store}
 
-    async def create(self, record: Record, synced_at: dt.datetime) -> None:
+    async def create(self, record: Record, synced_at: dt.datetime) -> bool:
         self._d.store[record.primary_key] = {
             "properties": dict(record.properties),
             "synced_at": synced_at.isoformat(),
             "writes": 1,
         }
+        return True
 
-    async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> None:
+    async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> bool:
         row = self._d.store[existing_id]
         for k, v in record.properties.items():
             if k not in self._d.create_only_properties:  # honor create-only seeds
                 row["properties"][k] = v
         row["synced_at"] = synced_at.isoformat()
         row["writes"] = row.get("writes", 1) + 1
+        return True

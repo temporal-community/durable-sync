@@ -83,7 +83,7 @@ async def main() -> None:
         st = await _wait_runs(handle, 1)
         assert len(dest.store) == 2, f"expected 2 rows (record 3 filtered), got {dest.store}"
         assert "3" not in dest.store, "transform filter did not drop record 3"
-        assert st.last_stats == {"total": 2, "created": 2, "updated": 0}, st.last_stats
+        assert st.last_stats == {"total": 2, "created": 2, "updated": 0, "skipped": 0}, st.last_stats
         assert dest.store["1"]["properties"].get("Origin") == "durable-sync", "transform did not derive Origin"
         print("run 1 stats:", st.last_stats, "| rows:", sorted(dest.store), "| transform: filtered '3', derived Origin")
 
@@ -95,7 +95,7 @@ async def main() -> None:
         await handle.signal(SourceSyncWorkflow.sync_now, [])
         st = await _wait_runs(handle, 2)
         assert len(dest.store) == 2, f"duplicates! {dest.store}"
-        assert st.last_stats == {"total": 2, "created": 0, "updated": 2}, st.last_stats
+        assert st.last_stats == {"total": 2, "created": 0, "updated": 2, "skipped": 0}, st.last_stats
         row1 = dest.store["1"]["properties"]
         assert row1["Seed"] == "orig", f"create-only seed was overwritten: {row1}"
         assert row1["Stars"] == 42, f"objective field not refreshed: {row1}"

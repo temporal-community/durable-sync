@@ -199,8 +199,10 @@ class _NotionSession:
             offset += PAGE
         return mapping
 
-    async def create(self, record: Record, synced_at: dt.datetime) -> None:
+    async def create(self, record: Record, synced_at: dt.datetime) -> bool:
         record = await self._maybe_enrich(record)
+        if record is None:
+            return False  # session_enrich dropped it (out of scope)
         page: dict[str, Any] = {"properties": self._encode(record.properties, synced_at)}
         if record.body:
             page["content"] = record.body[:_MAX_BODY]
@@ -212,9 +214,12 @@ class _NotionSession:
             {"parent": {"data_source_id": self._destination.data_source_id}, "pages": [page]},
         )
         await self._pace()
+        return True
 
-    async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> None:
+    async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> bool:
         record = await self._maybe_enrich(record)
+        if record is None:
+            return False  # session_enrich dropped it (out of scope)
         # Skip create-only seeds (enrichment) so human edits to them survive;
         # refresh the rest. Page body is written on create, not refreshed.
         props = {
@@ -231,8 +236,11 @@ class _NotionSession:
             args["icon"] = icon
         await self.call("notion-update-page", args)
         await self._pace()
+        return True
 
-    async def _maybe_enrich(self, record: Record) -> Record:
+    async def _maybe_enrich(self, record: Record) -> Record | None:
+        """Run the destination-side enrich hook (if any). It may return None to
+        DROP the record (an out-of-scope filter)."""
         if self._destination._session_enrich is not None:
             return await self._destination._session_enrich(self._session, record)
         return record

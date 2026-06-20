@@ -145,15 +145,17 @@ class _AsanaSession:
             params["offset"] = nxt["offset"]
         return mapping
 
-    async def create(self, record: Record, synced_at: dt.datetime) -> None:
+    async def create(self, record: Record, synced_at: dt.datetime) -> bool:
         data = _encode_task(self._d, record, synced_at, creating=True)
         await self._request("POST", "/tasks", json={"data": data})
         await self._pace()
+        return True
 
-    async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> None:
+    async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> bool:
         data = _encode_task(self._d, record, synced_at, creating=False)
         await self._request("PUT", f"/tasks/{existing_id}", json={"data": data})
         await self._pace()
+        return True
 
     async def _pace(self) -> None:
         if self._d.pacing_seconds > 0:
