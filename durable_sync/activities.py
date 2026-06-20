@@ -13,6 +13,8 @@ these closures and stays sandbox-clean.
 from __future__ import annotations
 
 import datetime as dt
+import inspect
+from typing import Awaitable, Callable, Union
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -23,17 +25,37 @@ from durable_sync.core import Destination, Record, Source, SourceSpec
 FETCH_SOURCE = "fetch_source"
 SYNC_RECORDS = "sync_records"
 
+# The GENERIC transform seam: Record -> Record (mutate/derive/rename) or None
+# (drop it — so transform doubles as a filter). Source- and destination-agnostic;
+# may be sync or async. For transforms that need source internals use the source's
+# enrich hook; for ones that read the destination use its session_enrich.
+Transform = Callable[[Record], Union[Record, None, Awaitable[Union[Record, None]]]]
 
-def make_activities(source: Source, destination: Destination) -> list:
+
+def make_activities(
+    source: Source, destination: Destination, *, transform: Transform | None = None
+) -> list:
     """Build the two generic activities, closed over the app's Source +
-    Destination. Returns a list ready to hand to a Temporal Worker."""
+    Destination (+ optional generic transform). Returns a list ready to hand to a
+    Temporal Worker."""
 
     @activity.defn(name=FETCH_SOURCE)
     async def fetch_source(
         spec: SourceSpec, only_items: list[str] | None = None
     ) -> list[Record]:
-        """Fetch ONE source unit (optionally just specific items)."""
-        return await source.fetch(spec, only_items)
+        """Fetch ONE source unit (optionally just specific items), then apply the
+        generic transform (which may drop records by returning None)."""
+        records = await source.fetch(spec, only_items)
+        if transform is None:
+            return records
+        out: list[Record] = []
+        for rec in records:
+            res = transform(rec)
+            if inspect.isawaitable(res):
+                res = await res
+            if res is not None:
+                out.append(res)
+        return out
 
     @activity.defn(name=SYNC_RECORDS)
     async def sync_records(records: list[Record]) -> dict:

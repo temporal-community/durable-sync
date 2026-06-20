@@ -106,11 +106,11 @@ class NotionDestination:
     # The worker auto-registers these so the token-owner workflow runs alongside
     # the sync. (Optional hook; destinations without aux work omit it.)
     def aux_workflows(self) -> list:
-        from durable_sync.auth.workflow import OAuthTokenWorkflow
+        from durable_sync.auth.oauth.workflow import OAuthTokenWorkflow
         return [OAuthTokenWorkflow]
 
     def aux_activities(self) -> list:
-        from durable_sync.auth.refresh import refresh_oauth_token
+        from durable_sync.auth.oauth.refresh import refresh_oauth_token
         return [refresh_oauth_token]
 
     @staticmethod

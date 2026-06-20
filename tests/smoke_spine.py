@@ -48,16 +48,26 @@ async def _wait_runs(handle, n: int, timeout_s: float = 30.0):
     raise AssertionError(f"workflow did not reach {n} runs in {timeout_s}s")
 
 
+def _transform(rec: Record):
+    """Generic transform seam: drop record '3' (filter) and derive a field on the
+    rest. Exercises both transform behaviours through the real workflow."""
+    if rec.primary_key == "3":
+        return None
+    rec.properties["Origin"] = "durable-sync"
+    return rec
+
+
 async def main() -> None:
     records = [
         Record(primary_key="1", properties={"Name": "Alpha", "Stars": 5, "Seed": "orig"}),
         Record(primary_key="2", properties={"Name": "Beta", "Stars": 9, "Seed": "orig"}),
+        Record(primary_key="3", properties={"Name": "Gamma (should be filtered)"}),
     ]
     source = ListSource(records)
     dest = MemoryDestination(create_only_properties={"Seed"})
 
     client = await connect()
-    worker = make_worker(client, source, dest)
+    worker = make_worker(client, source, dest, transform=_transform)
 
     async with worker:  # runs the worker for the duration of this block
         handle = await client.start_workflow(
@@ -71,9 +81,11 @@ async def main() -> None:
         # --- first sync ---
         await handle.signal(SourceSyncWorkflow.sync_now, [])
         st = await _wait_runs(handle, 1)
-        assert len(dest.store) == 2, f"expected 2 rows, got {dest.store}"
+        assert len(dest.store) == 2, f"expected 2 rows (record 3 filtered), got {dest.store}"
+        assert "3" not in dest.store, "transform filter did not drop record 3"
         assert st.last_stats == {"total": 2, "created": 2, "updated": 0}, st.last_stats
-        print("run 1 stats:", st.last_stats, "| rows:", sorted(dest.store))
+        assert dest.store["1"]["properties"].get("Origin") == "durable-sync", "transform did not derive Origin"
+        print("run 1 stats:", st.last_stats, "| rows:", sorted(dest.store), "| transform: filtered '3', derived Origin")
 
         # mutate a create-only seed locally; it must NOT be overwritten on update
         records[0].properties["Seed"] = "CHANGED"

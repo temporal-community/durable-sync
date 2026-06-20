@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 
 from durable_sync import config
-from durable_sync.auth.workflow import AuthParams, OAuthTokenWorkflow
+from durable_sync.auth.oauth.workflow import AuthParams, OAuthTokenWorkflow
 from durable_sync.destinations.notion import store
 from durable_sync.temporal_client import connect
 

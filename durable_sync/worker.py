@@ -27,8 +27,9 @@ def make_worker(
     destination: Destination,
     *,
     task_queue: str | None = None,
+    transform=None,
 ) -> Worker:
-    activities = make_activities(source, destination)
+    activities = make_activities(source, destination, transform=transform)
     workflows: list = [SourceSyncWorkflow]
 
     aux_acts = getattr(destination, "aux_activities", None)
@@ -52,9 +53,10 @@ async def run_worker(
     destination: Destination,
     *,
     task_queue: str | None = None,
+    transform=None,
 ) -> None:
     client = await connect()
-    worker = make_worker(client, source, destination, task_queue=task_queue)
+    worker = make_worker(client, source, destination, task_queue=task_queue, transform=transform)
     tq = task_queue or config.TASK_QUEUE
     print(f"Worker polling task queue '{tq}' on {config.TEMPORAL_ADDRESS}")
     await worker.run()

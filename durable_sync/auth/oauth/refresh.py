@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from temporalio import activity
 
-from durable_sync.auth import oauth
+from durable_sync.auth.oauth import flow as oauth
 
 
 @dataclass

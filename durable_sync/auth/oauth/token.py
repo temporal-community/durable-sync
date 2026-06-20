@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from temporalio.client import Client
 
-from durable_sync.auth.workflow import OAuthTokenWorkflow
+from durable_sync.auth.oauth.workflow import OAuthTokenWorkflow
 from durable_sync.temporal_client import connect
 
 _client: Client | None = None

@@ -23,7 +23,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from durable_sync.auth.refresh import RefreshInput, RefreshOutput, refresh_oauth_token
+    from durable_sync.auth.oauth.refresh import RefreshInput, RefreshOutput, refresh_oauth_token
 
 # Refresh this long before the access token's stated expiry.
 _REFRESH_SKEW = timedelta(minutes=5)

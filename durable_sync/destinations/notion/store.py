@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from durable_sync.auth import store as _store
+from durable_sync.auth.oauth import store as _store
 
 _FILE = os.getenv("DURABLE_SYNC_NOTION_AUTH_FILE", ".notion_auth.json")
 
