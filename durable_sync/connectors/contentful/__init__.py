@@ -12,6 +12,7 @@ Requires the `contentful` extra:  pip install "durable-sync[contentful]"
 from __future__ import annotations
 
 from durable_sync.connectors.contentful.destination import ContentfulDestination
+from durable_sync.connectors.contentful.mcp_destination import ContentfulMcpDestination
 from durable_sync.connectors.contentful.source import (
     ContentfulConfig,
     ContentfulEntryContext,
@@ -20,5 +21,5 @@ from durable_sync.connectors.contentful.source import (
 
 __all__ = [
     "ContentfulSource", "ContentfulConfig", "ContentfulEntryContext",
-    "ContentfulDestination",
+    "ContentfulDestination", "ContentfulMcpDestination",
 ]

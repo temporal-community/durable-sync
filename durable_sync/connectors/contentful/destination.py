@@ -32,6 +32,7 @@ from durable_sync.core import Record, auth_error_in_chain
 from durable_sync.linkstore import LinkStore
 from durable_sync.connectors.contentful import api
 from durable_sync.connectors.contentful.api import ContentfulSpace
+from durable_sync.connectors.contentful.encode import encode_fields
 
 _CMA_CONTENT_TYPE = "application/vnd.contentful.management.v1+json"
 
@@ -127,21 +128,8 @@ class _ContentfulSession:
 
 
 def _encode_fields(dest: ContentfulDestination, record: Record, *, creating: bool = True) -> dict[str, Any]:
-    """Neutral Record -> CMA `fields` ({field id: {locale: value}}). Pure (no IO).
-
-    Maps each property through `field_map` (neutral name -> CMA field id); unmapped
-    properties and Nones are dropped. On update, create-only properties are skipped
-    so human edits in Contentful survive. Values are written as-is under the
-    default locale (str/number/bool/list)."""
-    locale = dest.default_locale
-    out: dict[str, Any] = {}
-    for prop, value in record.properties.items():
-        if value is None:
-            continue
-        if not creating and prop in dest.create_only_properties:
-            continue
-        field_id = dest.field_map.get(prop)
-        if not field_id:
-            continue  # unmapped -> dropped (Contentful has a fixed content model)
-        out[field_id] = {locale: value}
-    return out
+    """Neutral Record -> CMA `fields`. Thin wrapper over the shared encoder."""
+    return encode_fields(
+        record, field_map=dest.field_map, default_locale=dest.default_locale,
+        create_only_properties=dest.create_only_properties, creating=creating,
+    )
