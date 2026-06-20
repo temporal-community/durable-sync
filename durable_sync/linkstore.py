@@ -46,10 +46,13 @@ class InMemoryLinkStore:
 
 
 class SqliteLinkStore:
-    """Durable, dependency-free, SINGLE-NODE reference impl (stdlib sqlite3). Fine
-    for one worker; for multi-node, back a LinkStore with your shared datastore.
-    Namespaced by `route` so several routes can share one file. SQLite calls run in
-    a thread (they're blocking) and are serialized by a lock."""
+    """LOCAL-DEV reference impl (stdlib sqlite3) — durable across restarts on ONE
+    machine. Do NOT use on Temporal Cloud or any multi-worker deployment: workers
+    are distributed and ephemeral with no shared local disk, so a links.db on one
+    worker is invisible to the others. Production wants an external SHARED
+    datastore (Postgres/Dynamo/Redis/…) behind the LinkStore seam — that's the
+    app's to own (see the boundary doctrine). Namespaced by `route` so several
+    routes can share one file; SQLite calls run in a thread, serialized by a lock."""
 
     def __init__(self, path: str, *, route: str = "default") -> None:
         self._path = path
