@@ -25,7 +25,8 @@ from typing import Any, Awaitable, Callable, AsyncIterator
 
 import httpx
 
-from durable_sync.core import Record
+from durable_sync.core import Record, auth_error_in_chain
+from durable_sync.http import request_with_retry
 
 ASANA_API = "https://app.asana.com/api/1.0"
 _MAX_NOTES = 65000
@@ -90,22 +91,11 @@ class AsanaDestination:
 
     @staticmethod
     def is_auth_error(err: BaseException) -> bool:
-        needles = ("401", "unauthorized", "not authorized", "invalid_token")
-        seen: set[int] = set()
-        stack: list[BaseException] = [err]
-        while stack:
-            cur = stack.pop()
-            if id(cur) in seen:
-                continue
-            seen.add(id(cur))
-            if any(n in str(cur).lower() for n in needles):
-                return True
-            if isinstance(cur, BaseExceptionGroup):
-                stack.extend(cur.exceptions)
-            for nxt in (cur.__cause__, cur.__context__):
-                if nxt is not None:
-                    stack.append(nxt)
-        return False
+        """A rejected PAT (401/403). Delegates to the shared matcher so we get the
+        word-boundary code check for free — Asana errors carry gids/request-ids,
+        and a bare `"401" in msg` would false-positive on one. "not authorized" is
+        Asana's own phrasing for a permission failure."""
+        return auth_error_in_chain(err, extra_needles=("not authorized",))
 
 
 class _AsanaSession:
@@ -114,17 +104,15 @@ class _AsanaSession:
         self._d = dest
 
     async def _request(self, method: str, path: str, *, params=None, json=None) -> dict:
-        for attempt in range(_MAX_RETRIES):
-            r = await self._client.request(method, path, params=params, json=json)
-            if r.status_code == 429 and attempt < _MAX_RETRIES - 1:
-                retry_after = r.headers.get("Retry-After")
-                delay = float(retry_after) if retry_after else _BACKOFF_BASE_SECONDS * (2 ** attempt)
-                await asyncio.sleep(delay)
-                continue
-            if r.status_code >= 400:
-                raise RuntimeError(f"Asana {method} {path} -> {r.status_code}: {r.text[:600]}")
-            return r.json() if r.content else {}
-        return {}
+        # Shared backoff (honors Retry-After); we keep the raise here so the error
+        # text carries the status for is_auth_error to classify.
+        r = await request_with_retry(
+            self._client, method, path, params=params, json=json,
+            max_attempts=_MAX_RETRIES, base_delay=_BACKOFF_BASE_SECONDS,
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(f"Asana {method} {path} -> {r.status_code}: {r.text[:600]}")
+        return r.json() if r.content else {}
 
     async def query_existing_ids(self) -> dict[str, str]:
         """{ external.gid (== our primary_key) -> task gid } for the project."""

@@ -65,6 +65,16 @@ class OAuthTokenWorkflow:
             refresh_token = out.refresh_token  # rotated — keep the newest
             refreshes += 1
 
+            sleep_for = timedelta(seconds=out.expires_in) - _REFRESH_SKEW
+            if sleep_for <= timedelta(0):
+                sleep_for = timedelta(seconds=max(out.expires_in // 2, 30))
+            await workflow.sleep(sleep_for)
+
+            # Roll history only AFTER sleeping until the token is near expiry, so
+            # the fresh run's immediate refresh is the one that's actually due —
+            # not a wasted back-to-back rotation (and no empty-token gap, since the
+            # old token was about to expire anyway). Carries the latest refresh
+            # token so the new run picks up exactly where this one left off.
             if refreshes >= _REFRESHES_BEFORE_CONTINUE:
                 workflow.continue_as_new(
                     AuthParams(
@@ -74,11 +84,6 @@ class OAuthTokenWorkflow:
                         refreshes_so_far=0,
                     )
                 )
-
-            sleep_for = timedelta(seconds=out.expires_in) - _REFRESH_SKEW
-            if sleep_for <= timedelta(0):
-                sleep_for = timedelta(seconds=max(out.expires_in // 2, 30))
-            await workflow.sleep(sleep_for)
 
     @workflow.query
     def get_access_token(self) -> str:

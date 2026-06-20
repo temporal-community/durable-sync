@@ -8,10 +8,10 @@ OAuth refresh, pagination, rate-limit backoff, auth-failure-pauses-don't-hammer)
 live in the spine; you implement two small seams. GitHub → Notion is the
 reference wiring.
 
-> **Status: early scaffold.** The spine, payload codec, and the Notion
-> destination (workflow-owned OAuth) are in. Generic activities/workflows, the
-> GitHub source, the Asana destination, and tests are landing next — see the
-> roadmap below.
+> **Status: reference wiring complete.** The spine (generic activities + entity
+> sync workflow + worker/bootstrap), payload codec, the GitHub source, and both
+> the Notion (workflow-owned OAuth) and Asana (REST + self-serve PAT)
+> destinations are all in, with tests. See what's built below.
 
 ## The whole thing in two seams
 
@@ -35,7 +35,7 @@ registration (no admin), and a long-running Temporal workflow owns the rotating
 refresh token — serializing refreshes (no rotation race), surviving restarts, and
 serving fresh access tokens via query so the secret never enters event history.
 The destination protocol is deliberately neither transport- nor auth-shaped: the
-Asana destination (next) uses plain REST + a self-serve token to prove it.
+Asana destination uses plain REST + a self-serve token to prove it.
 
 ## Install
 
@@ -51,23 +51,33 @@ pip install "durable-sync[all,dev]"    # everything + tests
 ```
 durable_sync/
 ├── core.py             Record + Source/Destination protocols (sandbox-safe spine)
+├── activities.py       generic fetch_source / sync_records (built by a factory)
+├── workflows/sync.py   SourceSyncWorkflow — one durable entity workflow per source unit
+├── worker.py           assembles the worker (+ a destination's aux workflows/activities)
+├── bootstrap.py        starts one entity workflow per source unit (idempotent)
 ├── codec.py            opt-in AES-GCM payload codec
 ├── config.py           runtime/connection config
 ├── temporal_client.py  client with the codec wired in
-├── sources/            where records come from   (github — next)
-└── destinations/       where records land
-    └── notion/         MCP transport + workflow-owned OAuth
+├── auth/oauth/         OAuth-as-a-workflow toolkit (token-owner workflow + flow)
+├── sources/
+│   └── github/         orgs + named repos -> Records, with an enrichment hook
+└── destinations/
+    ├── notion/         MCP transport + workflow-owned OAuth
+    └── asana/          direct REST + self-serve PAT
 ```
 
-## Roadmap
+## What's built
 
 - [x] Core spine (`Record`, `Source`/`Destination` protocols)
+- [x] Generic activities + entity sync workflow + worker/bootstrap
 - [x] Payload encryption codec
+- [x] OAuth-as-a-workflow toolkit (token-owner workflow, PKCE + dynamic client registration)
 - [x] Notion destination (workflow-owned OAuth, Bearer transport, 429 backoff, pacing)
-- [ ] Generic activities + entity sync workflow + worker/bootstrap
-- [ ] GitHub source (parameterized, with an enrichment hook)
-- [ ] Asana destination (REST + self-serve PAT)
-- [ ] Tests (conformance + normalizers)
+- [x] Asana destination (REST + self-serve PAT)
+- [x] GitHub source (parameterized orgs/repos, with an enrichment hook)
+- [x] Tests (offline spine smoke via `MemoryDestination`, Asana encode unit tests, live smokes)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to add your own source / destination / auth / transformation.
 
 ## License
 

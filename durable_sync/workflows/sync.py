@@ -13,7 +13,7 @@ invoked BY NAME, so this module never imports their (closure) implementations.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from temporalio import workflow
@@ -41,6 +41,11 @@ class SourceState:
     spec: SourceSpec
     paused: bool = False
     runs_completed: int = 0
+    # A sync_now that arrived but hasn't run yet must survive continue-as-new,
+    # else a targeted webhook refresh (its named items) is silently lost at the
+    # history-roll boundary. Carried here and restored in __init__.
+    sync_requested: bool = False
+    pending_items: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -60,8 +65,9 @@ class SourceSyncWorkflow:
     @workflow.init
     def __init__(self, state: SourceState) -> None:
         self._state = state
-        self._sync_requested = False
-        self._pending_items: list[str] = []   # targeted items from sync_now
+        # Restore a sync that was requested before the last continue-as-new.
+        self._sync_requested = state.sync_requested
+        self._pending_items: list[str] = list(state.pending_items)  # targeted items from sync_now
         self._last_run: str | None = None
         self._last_stats: dict | None = None
         self._last_error: str | None = None
@@ -91,9 +97,13 @@ class SourceSyncWorkflow:
             await self._run_once(only_items)
             self._state.runs_completed += 1
 
-            # Eternal workflow -> roll history so it never grows unbounded.
+            # Eternal workflow -> roll history so it never grows unbounded. Persist
+            # any sync_now that landed during/after this run so it isn't dropped at
+            # the boundary (a webhook's named items must survive the history roll).
             if workflow.info().is_continue_as_new_suggested():
                 await workflow.wait_condition(workflow.all_handlers_finished)
+                self._state.sync_requested = self._sync_requested
+                self._state.pending_items = self._pending_items
                 workflow.continue_as_new(args=[self._state])
 
     async def _run_once(self, only_items: list[str] | None) -> None:
@@ -144,7 +154,9 @@ class SourceSyncWorkflow:
 
     @workflow.signal
     def set_interval(self, minutes: int) -> None:
-        self._state.spec.interval_minutes = minutes
+        # Clamp to >=1: a 0/negative interval makes the durable timer fire
+        # immediately every loop, busy-spinning full syncs back to back.
+        self._state.spec.interval_minutes = max(1, int(minutes))
 
     # *_ absorbs a stray signal payload (e.g. `--input '[]'`). A signal handler
     # that raises POISONS the workflow task (it re-fails forever), so no-arg

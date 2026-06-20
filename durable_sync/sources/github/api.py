@@ -9,6 +9,8 @@ import logging
 
 import httpx
 
+from durable_sync.http import request_with_retry
+
 GITHUB_API = "https://api.github.com"
 PER_PAGE = 100
 log = logging.getLogger("durable_sync.sources.github")
@@ -54,9 +56,14 @@ def iso_date(s: str | None) -> str | None:
 
 
 # --- HTTP fetchers ---------------------------------------------------------
+# All go through request_with_retry, which backs off on 429 + GitHub's
+# rate-limited 403 (honoring Retry-After). The enrichment fetchers below tolerate
+# a failed call by returning empty, but LOG it first — a silently empty languages
+# list (because we got rate-limited) reads as "this repo has no languages", which
+# is a data-quality landmine on a large org sweep.
 
 async def get_repo(client: httpx.AsyncClient, full_name: str, headers: dict) -> dict | None:
-    r = await client.get(f"{GITHUB_API}/repos/{full_name}", headers=headers)
+    r = await request_with_retry(client, "GET", f"{GITHUB_API}/repos/{full_name}", headers=headers)
     if r.status_code == 404:
         log.warning("Repo not found, skipping: %s", full_name)
         return None
@@ -71,8 +78,8 @@ async def fetch_org_repos(
     repos: list[dict] = []
     page = 1
     while True:
-        r = await client.get(
-            f"{GITHUB_API}/orgs/{org}/repos",
+        r = await request_with_retry(
+            client, "GET", f"{GITHUB_API}/orgs/{org}/repos",
             headers=headers,
             params={"per_page": per_page, "page": page, "type": "public", "sort": "full_name"},
         )
@@ -86,27 +93,38 @@ async def fetch_org_repos(
 
 async def fetch_readme(client: httpx.AsyncClient, full_name: str, headers: dict) -> str | None:
     h = dict(headers, Accept="application/vnd.github.raw")
-    r = await client.get(f"{GITHUB_API}/repos/{full_name}/readme", headers=h)
-    return r.text if r.status_code == 200 else None
+    r = await request_with_retry(client, "GET", f"{GITHUB_API}/repos/{full_name}/readme", headers=h)
+    if r.status_code == 200:
+        return r.text
+    if r.status_code != 404:  # 404 = no README (normal); anything else is a real failure
+        log.warning("README fetch for %s failed: HTTP %s", full_name, r.status_code)
+    return None
 
 
 async def fetch_languages(client: httpx.AsyncClient, full_name: str, headers: dict) -> dict[str, int]:
-    r = await client.get(f"{GITHUB_API}/repos/{full_name}/languages", headers=headers)
-    return r.json() if r.status_code == 200 else {}
+    r = await request_with_retry(client, "GET", f"{GITHUB_API}/repos/{full_name}/languages", headers=headers)
+    if r.status_code == 200:
+        return r.json()
+    log.warning("Languages fetch for %s failed: HTTP %s — record will list none", full_name, r.status_code)
+    return {}
 
 
 async def fetch_contributors(
     client: httpx.AsyncClient, full_name: str, headers: dict, *, limit: int = 5
 ) -> list[str]:
     """Top contributor handles, most-commits-first, bots filtered out."""
-    r = await client.get(
-        f"{GITHUB_API}/repos/{full_name}/contributors",
+    r = await request_with_retry(
+        client, "GET", f"{GITHUB_API}/repos/{full_name}/contributors",
         headers=headers, params={"per_page": 25},
     )
-    if r.status_code != 200 or not isinstance(r.json(), list):
+    if r.status_code != 200:
+        log.warning("Contributors fetch for %s failed: HTTP %s", full_name, r.status_code)
+        return []
+    data = r.json()
+    if not isinstance(data, list):
         return []
     out: list[str] = []
-    for c in r.json():
+    for c in data:
         login = c.get("login")
         if login and not login.endswith("[bot]"):
             out.append(login)
@@ -120,13 +138,16 @@ async def fetch_org_members(client: httpx.AsyncClient, org: str, headers: dict) 
     members: set[str] = set()
     page = 1
     while True:
-        r = await client.get(
-            f"{GITHUB_API}/orgs/{org}/members",
+        r = await request_with_retry(
+            client, "GET", f"{GITHUB_API}/orgs/{org}/members",
             headers=headers, params={"per_page": 100, "page": page},
         )
-        if r.status_code != 200 or not isinstance(r.json(), list):
+        if r.status_code != 200:
+            log.warning("Org members fetch for %s failed: HTTP %s", org, r.status_code)
             break
         batch = r.json()
+        if not isinstance(batch, list):
+            break
         members.update(m["login"] for m in batch if m.get("login"))
         if len(batch) < 100:
             break

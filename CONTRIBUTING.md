@@ -100,7 +100,11 @@ class MyDestination:
 
     @staticmethod
     def is_auth_error(err: BaseException) -> bool:
-        return False                      # return True only for human-fixable auth failures (see gotchas)
+        # HTTP destinations: delegate to the shared matcher — it walks the cause
+        # chain + ExceptionGroups and matches 401/403 with WORD BOUNDARIES (see
+        # gotchas). Pass extra_needles=(...) for service-specific phrasings.
+        from durable_sync.core import auth_error_in_chain
+        return auth_error_in_chain(err)   # no interactive auth (e.g. a local DB)? just `return False`
 
 
 class _MySession:
@@ -196,8 +200,17 @@ in your app.
   can.
 - **Signal handlers must never raise.** A throwing handler *poisons the workflow task* (it re-fails
   forever). Keep them trivial (flip a flag), and tolerate stray payloads (`def resume(self, *_)`).
-- **`is_auth_error` must be precise.** Match status codes with word boundaries — a bare `"401" in msg`
-  false-positives on UUIDs/request-ids like `…-401e-…` and will wrongly pause a workflow.
+- **`is_auth_error` must be precise — don't hand-roll it.** Delegate to `core.auth_error_in_chain`,
+  which matches status codes with word boundaries: a bare `"401" in msg` false-positives on
+  UUIDs/request-ids like `…-401e-…` and will wrongly pause a workflow. (Both reference destinations
+  re-rolled this and drifted — Asana lost the word-boundary check *and* the `403` case — which is why
+  it's now one shared matcher.)
+- **HTTP fetches should back off, not hammer.** Route REST calls (source or destination) through
+  `durable_sync.http.request_with_retry`, which honors `Retry-After` and backs off on `429` / GitHub's
+  rate-limited `403`. And don't let an enrichment call fail *silently* — a swallowed error that returns
+  `[]`/`{}` looks like real-but-empty data downstream; `log.warning` first (see `sources/github/api.py`).
+  (The Notion destination is the exception — MCP surfaces failures as `isError` results, not HTTP
+  statuses, so it keeps its own small retry loop.)
 - **Determinism:** no clock/IO/randomness in workflows; use `workflow.now()`. All side effects live in
   activities.
 - **Records pass through workflow history** — fine at tens/hundreds; batch if a source grows into many

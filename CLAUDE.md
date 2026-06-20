@@ -1,0 +1,116 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A **library**, not an app. It provides a durable source→destination sync *spine* on
+Temporal; a consuming app wires a concrete `Source` + `Destination` together (the
+"`pipeline.py`" referenced in CONTRIBUTING.md is the app's, not in this repo). GitHub→Notion
+is the reference wiring. Read **CONTRIBUTING.md** first — it is the authoritative guide for
+adding a source / destination / auth mechanism / transformation, with real signatures and the
+hard-won gotchas. This file covers the big-picture architecture and commands.
+
+## Commands
+
+```bash
+pip install -e ".[all,dev]"          # editable install with every integration extra
+python -m pytest                      # unit tests — no network (this is the default CI run)
+python -m pytest tests/test_asana_encode.py        # single test file
+python -m pytest tests/test_asana_encode.py -k name # single test by name
+
+# Live smokes hit real services / a real Temporal server — run by hand, never in pytest.
+# All entrypoints need PYTHONPATH=. and a dev server: `temporal server start-dev`
+PYTHONPATH=. python tests/smoke_spine.py            # full spine, network-free MemoryDestination
+PYTHONPATH=. python tests/smoke_github.py           # gated on a real token
+python -m durable_sync.codec                        # generate a base64 AES-256 key for DURABLE_SYNC_ENC_KEY
+```
+
+Notion OAuth is a two-step, run-once setup (no admin token needed — authorizes as an individual):
+```bash
+PYTHONPATH=. python -m durable_sync.destinations.notion.bootstrap   # interactive: discovery/PKCE/DCR -> saves creds locally
+PYTHONPATH=. python -m durable_sync.destinations.notion.start       # hands the refresh token to OAuthTokenWorkflow
+```
+
+Drive/inspect a running entity workflow by id:
+```bash
+temporal workflow signal --workflow-id "durable-sync:<spec.key>" --name sync_now --input '[]'
+temporal workflow query  --workflow-id "durable-sync:<spec.key>" --type status
+```
+
+Config is all env vars (see `config.py`): `TEMPORAL_ADDRESS/NAMESPACE/API_KEY` (set the API key
+for Temporal Cloud → TLS), `DURABLE_SYNC_TASK_QUEUE`, `DURABLE_SYNC_ENC_KEY`. Integration-specific
+config (which orgs, which Notion DB) lives in the wired Source/Destination, never in `config.py`.
+
+## Architecture
+
+The whole library reduces to two seams an app implements; everything painful is inherited:
+
+```
+Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination upserts (idempotent, keyed on primary_key)
+```
+
+- **`core.py`** — the entire contract: `Record` (neutral interchange unit — `properties` are plain
+  Python values, the destination owns all wire-encoding), `SourceSpec`, and the `Source` /
+  `Destination` / `DestinationSession` protocols. **Side-effect-free and import-light** because it
+  is loaded into the Temporal workflow sandbox.
+- **`activities.py`** — `make_activities(source, destination, transform=)` is a **factory**: a
+  library can't `from pipeline import SOURCE` the way an app would, so the app calls this once with
+  its wired seams. Produces two activities registered under stable string names (`FETCH_SOURCE`,
+  `SYNC_RECORDS`). `sync_records` is the idempotent upsert: `query_existing_ids` → update-or-create
+  per `primary_key`, tallying `{created, updated, skipped}`.
+- **`workflows/sync.py`** — `SourceSyncWorkflow`, one long-lived **entity workflow per source unit**.
+  It is its own durable interruptible timer (sleeps `interval_minutes`, wakes early on a `sync_now`
+  signal), answers a `status` query, and uses continue-as-new to bound history. **There is no
+  Temporal Schedule — the loop itself is the periodicity.** It calls activities *by name*, so it
+  never imports their closures and stays sandbox-clean.
+- **`worker.py`** — `run_worker(SOURCE, DESTINATION)` assembles a Worker hosting the workflow +
+  activities, plus any `aux_workflows()` / `aux_activities()` the destination exposes (checked via
+  `getattr`). Provides a thread-pool `activity_executor` so **sync activities** (e.g. Notion's
+  `requests`-based OAuth refresh) can run.
+- **`bootstrap.py`** — `start_sources(SOURCE)` starts one workflow per `spec` with id
+  `durable-sync:<spec.key>` using `USE_EXISTING`, so it's idempotent and doubles as a reconcile.
+- **`http.py`** — shared httpx retry/backoff (`request_with_retry`) for REST sources/destinations:
+  honors `Retry-After`, backs off on `429` and GitHub's rate-limited `403`. Runs in activities, so
+  wall-clock sleeps are fine; sleeps are capped so a long rate-limit window becomes an activity retry.
+- **`temporal_client.py` + `codec.py`** — `connect()` is the single place a client is opened, with
+  the opt-in AES-GCM payload codec wired into the data_converter (must be consistent across worker,
+  starters, and token accessor or one client reads ciphertext it can't decode).
+
+### Two load-bearing patterns
+
+1. **Auth failure pauses the workflow instead of hammering.** When `destination.is_auth_error(e)` is
+   true, `sync_records` re-raises as a non-retryable `ApplicationError(type="AuthError")`. The
+   workflow's `_is_auth_failure` walks the cause chain, sets `paused=True`, and stops the timer loop.
+   A human re-authorizes, then sends the `resume` signal to catch up. (`ConfigError` is the other
+   non-retryable type; everything else stays retryable/transient.)
+2. **A workflow owns the rotating OAuth refresh token** (`auth/oauth/` + `destinations/notion`). The
+   refresh token lives in `OAuthTokenWorkflow` state and serves fresh access tokens via query — so
+   refreshes serialize (no rotation race), survive restarts, and the secret never enters event
+   history. This is why the encryption codec exists (it encrypts the token in history at rest).
+
+## Conventions that will bite you (full list in CONTRIBUTING.md "gotchas")
+
+- **Keep `__init__.py` import-free** in any package containing a workflow — an eager re-export once
+  pulled `requests` into the sandbox and broke workflow validation. `auth/oauth/__init__.py` is
+  intentionally empty for this reason. Import in submodules; use `with workflow.unsafe.imports_passed_through():`.
+- **Signal handlers must never raise** — a throwing handler poisons the workflow task forever. Keep
+  them flag-flips only, and let no-arg signals absorb stray payloads (`def resume(self, *_)`).
+- **`is_auth_error` — delegate to `core.auth_error_in_chain`**, don't hand-roll it. It matches
+  `401/403` with word boundaries (a bare `"401" in msg` false-positives on UUIDs/request-ids and
+  wrongly pauses the workflow) and walks the cause chain + ExceptionGroups. Pass `extra_needles=`
+  for service-specific phrasings.
+- **HTTP calls go through `durable_sync.http.request_with_retry`** (REST sources/destinations) — it
+  honors `Retry-After` and backs off on `429`/rate-limited `403`. Notion is the exception (MCP
+  surfaces errors as `isError` results, so it has its own retry loop in `NotionDestination.call`).
+- **Determinism in workflows**: `workflow.now()` not `datetime.now()`; no IO/randomness; all side
+  effects in activities.
+- **Never auto-delete.** Sync only creates/updates rows it fetched; rows it didn't fetch are left
+  untouched, so hand-added metadata and out-of-scope rows survive.
+- **Records pass through workflow history** — fine at hundreds; batch if a source grows to many thousands.
+
+## Testing a new destination
+
+It should pass the spine end-to-end via the `MemoryDestination` pattern (`tests/memory_destination.py`
+is a full-protocol, network-free destination; `tests/smoke_spine.py` exercises the whole spine offline)
+and ship a unit test for its Record→wire encoding (see `tests/test_asana_encode.py`).

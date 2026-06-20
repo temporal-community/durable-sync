@@ -23,14 +23,13 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
-import re
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable, AsyncIterator
 
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from durable_sync.core import Record
+from durable_sync.core import Record, auth_error_in_chain
 from durable_sync.destinations.notion import oauth
 from durable_sync.destinations.notion.token import current_access_token
 
@@ -116,31 +115,11 @@ class NotionDestination:
 
     @staticmethod
     def is_auth_error(err: BaseException) -> bool:
-        """True if err (or anything in its cause chain / ExceptionGroup) is an
-        auth failure only a human can fix: the Bearer token was rejected and the
-        refresh chain is broken (refresh token revoked/expired) -> re-bootstrap.
-
-        Status codes are matched with WORD BOUNDARIES, not substrings — a bare
-        `"401" in msg` false-positives on UUIDs/request-ids like `...-401e-...`
-        (which once misclassified a Notion validation_error as an auth failure)."""
-        text_needles = ("unauthorized", "invalid_token", "invalid_grant", "forbidden")
-        code_re = re.compile(r"\b(401|403)\b")
-        seen: set[int] = set()
-        stack: list[BaseException] = [err]
-        while stack:
-            cur = stack.pop()
-            if id(cur) in seen:
-                continue
-            seen.add(id(cur))
-            msg = str(cur).lower()
-            if any(n in msg for n in text_needles) or code_re.search(msg):
-                return True
-            if isinstance(cur, BaseExceptionGroup):
-                stack.extend(cur.exceptions)
-            for nxt in (cur.__cause__, cur.__context__):
-                if nxt is not None:
-                    stack.append(nxt)
-        return False
+        """A rejected Bearer token / broken refresh chain (revoked or expired) ->
+        re-bootstrap. The default signatures (401/403, unauthorized, forbidden,
+        invalid_token/grant) cover every Notion auth failure we've seen, so we
+        delegate to the shared, word-boundary-correct matcher in the spine."""
+        return auth_error_in_chain(err)
 
 
 class _NotionSession:

@@ -15,6 +15,7 @@ and Asana (destinations).
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncContextManager, Protocol, runtime_checkable
 
@@ -123,5 +124,43 @@ class Destination(Protocol):
     def is_auth_error(err: BaseException) -> bool:
         """True if `err` is an auth failure only a human can fix (so the workflow
         pauses instead of hammering). Destination-specific. OPTIONAL: destinations
-        with no interactive auth (e.g. a local DB) should just `return False`."""
+        with no interactive auth (e.g. a local DB) should just `return False`.
+        Most HTTP destinations can delegate to `auth_error_in_chain` below."""
         ...
+
+
+# Default auth-failure signatures shared by HTTP destinations. Status codes are
+# matched separately (with WORD BOUNDARIES) so a bare "401"/"403" inside a UUID
+# or request-id can't false-positive — the bug that once paused a workflow on a
+# Notion validation_error whose id contained "401e".
+_AUTH_TEXT_NEEDLES = ("unauthorized", "forbidden", "invalid_token", "invalid_grant")
+_AUTH_CODE_RE = re.compile(r"\b(401|403)\b")
+
+
+def auth_error_in_chain(err: BaseException, *, extra_needles: tuple[str, ...] = ()) -> bool:
+    """Shared `is_auth_error` implementation: walk `err`'s cause/context chain and
+    any ExceptionGroup, returning True if any message looks like a human-fixable
+    auth failure (401/403, unauthorized, forbidden, invalid_token/grant). A
+    destination passes `extra_needles` for service-specific phrasings (e.g. Asana's
+    "not authorized"). Pure/deterministic — no I/O — so it's safe to import widely.
+
+    This lives in the spine so every destination shares ONE correct matcher
+    instead of re-deriving the chain walk + word-boundary code check (which is
+    exactly where Notion and Asana had drifted apart)."""
+    needles = _AUTH_TEXT_NEEDLES + tuple(n.lower() for n in extra_needles)
+    seen: set[int] = set()
+    stack: list[BaseException] = [err]
+    while stack:
+        cur = stack.pop()
+        if id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        msg = str(cur).lower()
+        if any(n in msg for n in needles) or _AUTH_CODE_RE.search(msg):
+            return True
+        if isinstance(cur, BaseExceptionGroup):
+            stack.extend(cur.exceptions)
+        for nxt in (cur.__cause__, cur.__context__):
+            if nxt is not None:
+                stack.append(nxt)
+    return False
