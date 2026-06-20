@@ -125,5 +125,23 @@ def refresh_access_token(token_endpoint: str, client_id: str, refresh_token: str
         },
         timeout=_TIMEOUT,
     )
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        # OAuth errors are JSON: {"error": "...", "error_description": "..."}. Surface
+        # the body, and turn the common "your token is dead" cases into a plain-English
+        # hint instead of a bare HTTPError. Keep `invalid_grant`/401 in the message so
+        # is_auth_error still classifies it.
+        body = resp.text[:600]
+        try:
+            err = (resp.json() or {}).get("error", "")
+        except ValueError:
+            err = ""
+        if err in ("invalid_grant", "invalid_client") or resp.status_code in (400, 401):
+            raise RuntimeError(
+                f"OAuth token refresh rejected ({resp.status_code} {err or 'error'}). The stored "
+                f"refresh token is no longer valid — expired, revoked, or already spent (providers "
+                f"that rotate the refresh token on every use, e.g. Notion, invalidate the old one each "
+                f"refresh). Re-authorize to mint a fresh token by re-running your provider's bootstrap. "
+                f"Server said: {body}"
+            )
+        raise RuntimeError(f"OAuth token refresh failed ({resp.status_code}): {body}")
     return resp.json()
