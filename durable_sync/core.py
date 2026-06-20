@@ -104,6 +104,11 @@ class Destination(Protocol):
 
     def connect(self) -> AsyncContextManager[DestinationSession]: ...
 
+    # OPTIONAL hooks (checked via getattr by the worker — don't define if unused):
+    #   def aux_workflows(self) -> list: ...   extra Temporal workflows to register
+    #   def aux_activities(self) -> list: ...  extra activities to register
+    # e.g. the Notion destination registers its token-owner auth workflow here.
+
     @property
     def config_hint(self) -> str:
         """Human-readable hint naming what to set when `configured` is False

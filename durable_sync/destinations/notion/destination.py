@@ -103,6 +103,16 @@ class NotionDestination:
                 await session.initialize()
                 yield _NotionSession(session, self)
 
+    # The worker auto-registers these so the token-owner workflow runs alongside
+    # the sync. (Optional hook; destinations without aux work omit it.)
+    def aux_workflows(self) -> list:
+        from durable_sync.destinations.notion.auth_workflow import NotionAuthWorkflow
+        return [NotionAuthWorkflow]
+
+    def aux_activities(self) -> list:
+        from durable_sync.destinations.notion.refresh import refresh_notion_token
+        return [refresh_notion_token]
+
     @staticmethod
     def is_auth_error(err: BaseException) -> bool:
         """True if err (or anything in its cause chain / ExceptionGroup) is an
