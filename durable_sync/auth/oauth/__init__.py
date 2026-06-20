@@ -3,24 +3,16 @@
 For destinations whose API offers no admin-free static token: authorize as an
 individual via OAuth 2.1 + PKCE + dynamic client registration, then let a Temporal
 workflow OWN the rotating refresh token — refreshing on a timer and serving fresh
-access tokens via query (so the secret never enters event history).
+access tokens via query (so the secret never enters event history). Standards-based
+(RFC 8414 discovery, RFC 7591 dynamic registration, PKCE).
 
-Standards-based (RFC 8414 discovery, RFC 7591 dynamic registration, PKCE), so it
-works for any conformant provider given its base URL. Notion is the first
-consumer (see destinations/notion); a future Slack/Linear/Jira/Google destination
-reuses this wholesale.
+Import from the SUBMODULES, not this package. This __init__ deliberately imports
+nothing: `flow` pulls in `requests`, and the Temporal workflow sandbox forbids
+that — so it must only ever be loaded via the workflow's pass-through import, never
+eagerly here (an eager re-export here breaks `OAuthTokenWorkflow` sandbox validation).
+
+    from durable_sync.auth.oauth.workflow import OAuthTokenWorkflow, AuthParams
+    from durable_sync.auth.oauth.refresh  import refresh_oauth_token
+    from durable_sync.auth.oauth.token    import current_access_token
+    from durable_sync.auth.oauth import flow, store
 """
-from __future__ import annotations
-
-from durable_sync.auth.oauth.refresh import RefreshInput, RefreshOutput, refresh_oauth_token
-from durable_sync.auth.oauth.token import current_access_token
-from durable_sync.auth.oauth.workflow import AuthParams, OAuthTokenWorkflow
-
-__all__ = [
-    "OAuthTokenWorkflow",
-    "AuthParams",
-    "refresh_oauth_token",
-    "RefreshInput",
-    "RefreshOutput",
-    "current_access_token",
-]
