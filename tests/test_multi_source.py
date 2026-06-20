@@ -27,24 +27,24 @@ class _Fake:
 
 def test_specs_namespaced_by_source_name():
     a = _Fake("luma", [SourceSpec(key="events", interval_minutes=10)])
-    b = _Fake("youtube", [SourceSpec(key="channel:@temporalio", interval_minutes=20)])
+    b = _Fake("youtube", [SourceSpec(key="channel:@example", interval_minutes=20)])
     multi = MultiSource(a, b)
     by_key = {s.key: s for s in multi.specs()}
-    assert set(by_key) == {"luma:events", "youtube:channel:@temporalio"}
+    assert set(by_key) == {"luma:events", "youtube:channel:@example"}
     # interval + params are preserved through the namespacing.
     assert by_key["luma:events"].interval_minutes == 10
-    assert by_key["youtube:channel:@temporalio"].interval_minutes == 20
+    assert by_key["youtube:channel:@example"].interval_minutes == 20
 
 
 def test_fetch_dispatches_to_owner_and_restores_inner_key():
     a = _Fake("luma", [SourceSpec(key="events")])
     # inner key itself contains a ':' — partition must keep it intact.
-    b = _Fake("youtube", [SourceSpec(key="channel:@temporalio")])
+    b = _Fake("youtube", [SourceSpec(key="channel:@example")])
     multi = MultiSource(a, b)
 
-    recs = asyncio.run(multi.fetch(SourceSpec(key="youtube:channel:@temporalio"), ["vid1"]))
+    recs = asyncio.run(multi.fetch(SourceSpec(key="youtube:channel:@example"), ["vid1"]))
     assert recs[0].properties["by"] == "youtube"
-    assert b.seen == [("channel:@temporalio", ["vid1"])]   # inner key restored
+    assert b.seen == [("channel:@example", ["vid1"])]   # inner key restored
     assert a.seen == []                                     # other source untouched
 
 

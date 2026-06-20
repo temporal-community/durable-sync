@@ -10,8 +10,8 @@ from durable_sync.sources.github import (
     GitHubConfig,
     GitHubSource,
     RepoContext,
-    author_type,
     classify,
+    is_member,
 )
 
 # Toy app vocab (in the real app this is the Temporal pattern/SDK maps).
@@ -20,10 +20,12 @@ TOPIC_PATTERNS = {"wordle": "Game", "temporal": "Temporal", "python": "Python"}
 
 def enrich(record, ctx: RepoContext):
     """Source-side enrichment (option A): layer domain fields using the context,
-    WITHOUT importing the source's internals."""
+    WITHOUT importing the source's internals. Note the Employee/Community labels
+    live HERE, in app code — the library only hands over the neutral `is_member`
+    boolean + the member set."""
     topics = ctx.raw_repo.get("topics") or []
     record.properties["Patterns"] = classify(topics, TOPIC_PATTERNS)
-    kinds = {author_type(a, ctx.members) for a in ctx.authors} or {"Community"}
+    kinds = {("Employee" if is_member(a, ctx.members) else "Community") for a in ctx.authors} or {"Community"}
     record.properties["Owner type"] = (
         "Employee" if kinds == {"Employee"}
         else "Community" if kinds == {"Community"} else "Mixed"
@@ -35,7 +37,7 @@ def enrich(record, ctx: RepoContext):
 async def main() -> None:
     cfg = GitHubConfig(
         sources=[("repos", ["temporal-community/durable-wordle"])],
-        employee_orgs=["temporal-community"],
+        member_orgs=["temporal-community"],
     )
     src = GitHubSource(cfg, enrich=enrich)
     [spec] = src.specs()

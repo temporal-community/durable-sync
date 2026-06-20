@@ -9,10 +9,10 @@ Requires the `github` extra:  pip install "durable-sync[github]"
 from __future__ import annotations
 
 from durable_sync.sources.github.api import (
-    author_type,
     build_headers,
     classify,
     fetch_org_members,
+    is_member,
     raw_languages,
 )
 from durable_sync.sources.github.source import (
@@ -25,7 +25,7 @@ __all__ = [
     "GitHubSource",
     "GitHubConfig",
     "RepoContext",
-    "author_type",
+    "is_member",
     "classify",
     "raw_languages",
     "fetch_org_members",

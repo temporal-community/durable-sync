@@ -31,13 +31,19 @@ class GitHubConfig:
     """Everything GitHub-specific a deployment supplies.
 
     sources: list of ("org", "name") and/or ("repos", ["owner/repo", ...]).
-      org sources are gated by inclusion_topic (unless discovery_mode); named
-      repos are included by virtue of being named.
+      org sources are gated by inclusion_topic (unless it's None / discovery_mode);
+      named repos are included by virtue of being named.
     """
     sources: list[tuple[str, Any]]
-    inclusion_topic: str = "demo"
+    # Include only org repos carrying this GitHub topic. None = no topic gate
+    # (include every non-archived repo). There's no universal default, so set the
+    # topic your org uses to mark in-scope repos.
+    inclusion_topic: str | None = None
     discovery_mode: bool = False          # org sweep ignores topic + skips README
-    employee_orgs: list[str] = field(default_factory=list)  # membership => Employee
+    # Orgs whose member logins are surfaced to the enrich hook as RepoContext.members
+    # (e.g. to distinguish insiders from outside contributors). The source attaches
+    # the set; YOUR hook decides what membership means.
+    member_orgs: list[str] = field(default_factory=list)
     title_property: str = "Name"
     interval_minutes: int = 30
     per_page: int = api.PER_PAGE
@@ -101,10 +107,10 @@ class GitHubSource:
         headers = api.build_headers(os.environ.get(cfg.token_env))
 
         async with httpx.AsyncClient(timeout=30) as client:
-            # Employee set: one pass, only when an enrich hook can use it.
+            # Member set: one pass, only when an enrich hook can use it.
             members: set[str] = set()
-            if self._enrich and cfg.employee_orgs:
-                for org in cfg.employee_orgs:
+            if self._enrich and cfg.member_orgs:
+                for org in cfg.member_orgs:
                     members |= await api.fetch_org_members(client, org, headers)
 
             repos = await self._select_repos(client, headers, spec, kind, only_items)
@@ -165,10 +171,10 @@ class GitHubSource:
     def _passes_gate(self, repo: dict) -> bool:
         if repo.get("archived"):
             return False
-        if self._config.discovery_mode:
+        if self._config.discovery_mode or self._config.inclusion_topic is None:
             return True
         topics = [t.lower() for t in (repo.get("topics") or [])]
-        return self._config.inclusion_topic in topics
+        return self._config.inclusion_topic.lower() in topics
 
     def _base_record(
         self, repo: dict, readme: str | None, lang_bytes: dict[str, int], authors: list[str]

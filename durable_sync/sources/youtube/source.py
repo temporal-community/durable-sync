@@ -34,14 +34,15 @@ _MAX_SUMMARY = 2000
 
 @dataclass
 class YouTubeConfig:
-    """Everything YouTube-specific a deployment supplies. `channel` is a channel id
-    ('UC…') or a handle ('@temporalio'); the client resolves a handle to its id."""
-    channel: str = "@temporalio"
+    """Everything YouTube-specific a deployment supplies. `channel` (required) is a
+    channel id ('UC…') or a handle ('@name'); the client resolves a handle to its
+    id."""
+    channel: str
     token_env: str = "YOUTUBE_API_KEY"
     lookback_days: int = 21
     interval_minutes: int = 360
     title_property: str = "Name"
-    ship_type: str = "Video"
+    item_type: str = "Video"         # value written to the neutral "Type" column
 
 
 @dataclass
@@ -62,8 +63,8 @@ def _heartbeat(detail: str) -> None:
 class YouTubeSource:
     name = "youtube"
 
-    def __init__(self, config: YouTubeConfig | None = None, *, enrich: EnrichHook | None = None):
-        self._config = config or YouTubeConfig()
+    def __init__(self, config: YouTubeConfig, *, enrich: EnrichHook | None = None):
+        self._config = config
         self._enrich = enrich
 
     def specs(self) -> list[SourceSpec]:
@@ -109,7 +110,7 @@ class YouTubeSource:
             primary_key=vid,
             title_property=cfg.title_property,
             title=title,
-            item_type=cfg.ship_type,
+            item_type=cfg.item_type,
             source="YouTube",
             url=f"https://www.youtube.com/watch?v={vid}" if vid else None,
             date=v.get("publishedAt"),

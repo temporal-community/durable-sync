@@ -1,8 +1,8 @@
 """Luma source: events from a Luma calendar -> Records.
 
 Ships the Luma *mechanism* (HTTP fetchers + neutral mapping); the *policy* (e.g.
-matching hosts to a team roster) belongs in your app's `enrich` hook — see
-LumaEventContext, which carries host emails for exactly that.
+matching hosts against your own directory of people) belongs in your app's
+`enrich` hook — see LumaEventContext, which carries host emails for exactly that.
 
 Requires the `luma` extra:  pip install "durable-sync[luma]"
 """

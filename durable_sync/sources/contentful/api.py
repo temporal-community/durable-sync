@@ -113,7 +113,7 @@ def _index_includes(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 async def _iter_cma(client, space, content_type, after_iso):
     """Like _iter_cda, but the CMA returns drafts + per-locale fields + no link
     resolution — so flatten locales, mark publish state, and resolve via a person
-    index. We keep drafts: the index tracks in-process ships."""
+    index. We keep drafts: in-process items are still worth indexing."""
     person_index = await _load_person_index_cma(client, space)
     out: list[tuple[dict, list[dict]]] = []
     skip = 0

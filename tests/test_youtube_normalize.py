@@ -1,11 +1,15 @@
 """Pure unit tests for the YouTube video->Record normalization (no network)."""
 from __future__ import annotations
 
-from durable_sync.sources.youtube import YouTubeSource
+from durable_sync.sources.youtube import YouTubeConfig, YouTubeSource
+
+
+def _source() -> YouTubeSource:
+    return YouTubeSource(YouTubeConfig(channel="@example"))
 
 
 def test_basic_mapping():
-    rec = YouTubeSource()._to_record({
+    rec = _source()._to_record({
         "videoId": "abc123",
         "title": "Durable Execution in 5 min",
         "description": "A short demo by Angie.",
@@ -25,7 +29,7 @@ def test_basic_mapping():
 
 
 def test_missing_views_and_title():
-    rec = YouTubeSource()._to_record({"videoId": "z", "viewCount": None})
+    rec = _source()._to_record({"videoId": "z", "viewCount": None})
     assert rec.properties["Name"] == "(untitled video)"
     assert rec.properties["Reach"] is None
 

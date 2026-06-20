@@ -2,7 +2,7 @@
 
 YouTube exposes no per-video author, so attribution (if you need it) is an
 app-side concern: the Record carries a "Scan Text" field and the enrich hook gets
-a YouTubeVideoContext for inverted name-matching against your own roster.
+a YouTubeVideoContext for inverted name-matching against your own directory of people.
 
 Requires the `youtube` extra:  pip install "durable-sync[youtube]"
 """

@@ -45,9 +45,11 @@ def classify(topics: list[str], mapping: dict[str, str]) -> list[str]:
     return out
 
 
-def author_type(handle: str, members: set[str]) -> str:
-    """Employee/Community from org membership (insider-or-not, not identity)."""
-    return "Employee" if handle in members else "Community"
+def is_member(handle: str, members: set[str]) -> bool:
+    """Whether a contributor handle belongs to the org-member set (insider-or-not).
+    Neutral primitive: an app's enrich hook picks its own labels
+    (e.g. Employee/Community, Staff/External) from this boolean."""
+    return handle in members
 
 
 def iso_date(s: str | None) -> str | None:

@@ -3,10 +3,10 @@ enrichment hook.
 
 Contentful is usually shared across teams, so a Source here is scoped by CONTENT
 TYPE: `content_types` maps each content-type id you care about to the "Type" label
-it should carry (e.g. {"codeExchange": "Code Exchange"}). One entity workflow per
-content type. Whether a *shared* type's entries are kept (e.g. only when an author
-matches your roster) is app policy — do it in your `enrich`/transform hook, which
-gets the resolved authors via `ContentfulEntryContext`.
+it should carry (e.g. {"blogPost": "Blog"}). One entity workflow per content type.
+Whether a *shared* type's entries are kept (e.g. only when an author matches your
+own directory) is app policy — do it in your `enrich`/transform hook, which gets
+the resolved authors via `ContentfulEntryContext`.
 
 Auth: prefer a read-only Delivery (CDA) token; a self-serve Management (CMA) PAT
 is the fallback (and the only mode that sees drafts). Each is read from the env
@@ -80,7 +80,7 @@ class ContentfulSource:
         cfg = self._config
         return [
             SourceSpec(key=f"type:{ct_id}", interval_minutes=cfg.interval_minutes,
-                       params={"content_type": ct_id, "ship_type": label})
+                       params={"content_type": ct_id, "item_type": label})
             for ct_id, label in cfg.content_types.items()
         ]
 
@@ -97,7 +97,7 @@ class ContentfulSource:
     async def fetch(self, spec: SourceSpec, only_items: list[str] | None = None) -> list[Record]:
         cfg = self._config
         content_type = spec.params["content_type"]
-        ship_type = spec.params.get("ship_type") or cfg.content_types.get(content_type, content_type)
+        item_type = spec.params.get("item_type") or cfg.content_types.get(content_type, content_type)
         space = self._space()
         after_iso = (datetime.now(timezone.utc) - timedelta(days=cfg.lookback_days)).isoformat()
         targeted = set(only_items or [])
@@ -110,8 +110,8 @@ class ContentfulSource:
                 if targeted and source_id not in targeted:
                     continue
                 if not _has_title(entry):
-                    continue  # empty-shell draft, no title yet -> not a real ship
-                record = self._to_record(entry, ship_type, authors)
+                    continue  # empty-shell draft, no title yet -> not a real item
+                record = self._to_record(entry, item_type, authors)
                 if self._enrich is not None:
                     ctx = ContentfulEntryContext(raw_entry=entry, authors=authors,
                                                  content_type=content_type, client=client)
@@ -123,7 +123,7 @@ class ContentfulSource:
         log.info("Fetched %d Contentful %s entries for %s", len(out), content_type, spec.key)
         return out
 
-    def _to_record(self, entry: dict, ship_type: str, authors: list[dict]) -> Record:
+    def _to_record(self, entry: dict, item_type: str, authors: list[dict]) -> Record:
         """Map one Contentful entry (+ resolved authors) to a neutral Record. Pure."""
         cfg = self._config
         sys = entry.get("sys", {})
@@ -131,8 +131,8 @@ class ContentfulSource:
 
         source_id = sys.get("id", "")
         name = fields.get("title") or fields.get("name") or "(untitled entry)"
-        # Ship date = explicit publish-date field if present, else createdAt.
-        ship_date = fields.get("publishDate") or fields.get("date") or sys.get("createdAt")
+        # Date = explicit publish-date field if present, else createdAt.
+        item_date = fields.get("publishDate") or fields.get("date") or sys.get("createdAt")
         status = "Published" if entry.get("_published", True) else "Draft"
 
         slug = fields.get("slug")
@@ -142,7 +142,7 @@ class ContentfulSource:
 
         host_names = [a["name"] for a in authors if a.get("name")]
         # authorOverwriteText (a community author with no `person`) wins for the
-        # human-readable label; resolved names still drive any roster matching.
+        # human-readable label; resolved names still drive any author matching.
         author = fields.get("authorOverwriteText") or ", ".join(host_names)
         tags = [t for t in (fields.get("tags") or []) if isinstance(t, str)]
 
@@ -150,10 +150,10 @@ class ContentfulSource:
             primary_key=source_id,
             title_property=cfg.title_property,
             title=str(name),
-            item_type=ship_type,
+            item_type=item_type,
             source="Contentful",
             url=url,
-            date=ship_date,
+            date=item_date,
             status=status,
             author=str(author),
             authors=host_names,

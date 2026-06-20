@@ -4,7 +4,7 @@ Config is injected (no module globals), so the same code serves any calendar. Th
 base fetch produces a neutral Record per event. If you pass an `enrich` hook, the
 source ALSO hands it a `LumaEventContext` (the raw entry + resolved hosts, incl.
 emails, + the live client) so your app can layer on domain logic — e.g. resolve
-hosts against a team roster — WITHOUT the source baking that policy in.
+hosts against your own directory of people — WITHOUT the source baking that policy in.
 
 Auth: a Luma Plus API key (Calendar -> Settings -> Developer -> API keys), read
 from the env var named by `LumaConfig.token_env`. Requires the `luma` extra.
@@ -36,9 +36,9 @@ class LumaConfig:
     """Everything Luma-specific a deployment supplies."""
     token_env: str = "LUMA_API_KEY"
     lookback_days: int = 21          # rolling window pulled when no items are targeted
-    interval_minutes: int = 360      # 6h, matching the original schedule
+    interval_minutes: int = 360      # 6h
     title_property: str = "Name"
-    ship_type: str = "Event"
+    item_type: str = "Event"         # value written to the neutral "Type" column
 
 
 @dataclass
@@ -46,7 +46,7 @@ class LumaEventContext:
     """Handed to the enrich hook: everything already fetched for one event, plus
     the live client + headers so enrich can make extra calls without re-auth."""
     raw_entry: dict
-    hosts: list[dict]              # [{name, email, ...}] — emails for roster matching
+    hosts: list[dict]              # [{name, email, ...}] — emails for identity matching
     client: httpx.AsyncClient
     headers: dict[str, str]
 
@@ -115,7 +115,7 @@ class LumaSource:
             primary_key=source_id,
             title_property=cfg.title_property,
             title=name,
-            item_type=cfg.ship_type,
+            item_type=cfg.item_type,
             source="Luma",
             url=url,
             date=start_at,
