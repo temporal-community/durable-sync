@@ -1,11 +1,33 @@
 [project]
 name = "durable-sync"
 version = "0.1.0"
-description = "Durable, idempotent source -> destination sync, built on Temporal. GitHub->Notion is the reference wiring; bring your own source/destination."
+description = "Keep your tools in sync on autopilot — durable, idempotent data sync from any source into any destination, built on Temporal."
+readme = "README.md"
 requires-python = ">=3.11"  # BaseExceptionGroup (auth-error taxonomy) is builtin in 3.11+
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Angie Byron", email = "angela.byron@temporal.io" }]
+keywords = ["temporal", "sync", "etl", "idempotent", "workflow", "oauth", "integration"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Framework :: AsyncIO",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Distributed Computing",
+]
 dependencies = [
     "temporalio>=1.7",
 ]
+
+[project.urls]
+Homepage = "https://github.com/temporal-community/durable-sync"
+Repository = "https://github.com/temporal-community/durable-sync"
+Issues = "https://github.com/temporal-community/durable-sync/issues"
 
 [project.optional-dependencies]
 # Each integration pulls only what it needs, so a GitHub->Asana user never
@@ -21,7 +43,7 @@ dev = ["pytest>=8.0", "python-dotenv>=1.0"]
 all = ["mcp>=1.2", "requests>=2.31", "httpx>=0.27", "cryptography>=42"]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]  # PEP 639 SPDX license expression + license-files
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
