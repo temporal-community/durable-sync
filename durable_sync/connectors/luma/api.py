@@ -102,5 +102,6 @@ async def create_event(client: httpx.AsyncClient, payload: dict[str, Any]) -> st
 
 
 async def update_event(client: httpx.AsyncClient, api_id: str, payload: dict[str, Any]) -> None:
-    """Update an existing event in place (idempotency handle = api_id)."""
-    await _write(client, UPDATE_EVENT_PATH, {"api_id": api_id, **payload})
+    """Update an existing event in place. NB: /event/update names the identifier
+    `event_id` (create returns it as `api_id`) — confirmed against the live API."""
+    await _write(client, UPDATE_EVENT_PATH, {"event_id": api_id, **payload})
