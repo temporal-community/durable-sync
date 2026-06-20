@@ -51,10 +51,13 @@ class McpSession:
             return payload
         return ""  # unreachable: loop returns or raises
 
+    async def tools(self) -> list:
+        """The raw tool definitions this server exposes (name/description/inputSchema)."""
+        return (await self.session.list_tools()).tools
+
     async def tool_names(self) -> list[str]:
         """The names of the tools this server exposes (handy for discovery)."""
-        tools = await self.session.list_tools()
-        return [t.name for t in tools.tools]
+        return [t.name for t in await self.tools()]
 
 
 @asynccontextmanager
