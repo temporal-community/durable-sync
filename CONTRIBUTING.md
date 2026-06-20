@@ -289,3 +289,26 @@ almost 1:1 onto batch-orchestra's page/cursor model, so adopting it is a localiz
 `_run_once` (swap the serial page-loop for a batch-orchestra run driven by the same `fetch_page`) — not
 a connector rewrite. Don't add the dependency pre-emptively; reach for it when a source actually hits
 that tier.
+
+## Releasing (to PyPI)
+
+Releases publish automatically via GitHub Actions + PyPI **trusted publishing** (OIDC — no API tokens
+stored anywhere). `.github/workflows/publish.yml` builds, `twine check`s, and uploads whenever a
+GitHub Release is published.
+
+**One-time PyPI setup** (because `durable-sync` doesn't exist on PyPI yet, use a *pending* publisher):
+PyPI → *Account settings → Publishing → Add a pending publisher* —
+- PyPI project name: `durable-sync`
+- Owner: `temporal-community`  ·  Repository: `durable-sync`
+- Workflow filename: `publish.yml`  ·  Environment name: `pypi`
+
+(Optionally create a GitHub Environment named `pypi` with required reviewers, for a manual approval
+gate before each publish.)
+
+**To cut a release:**
+1. Bump `version` in `pyproject.toml` (PyPI versions are immutable — never reuse one).
+2. Commit, then create a GitHub Release whose tag matches (e.g. `v0.1.0`).
+3. The workflow builds and publishes; watch it under the repo's Actions tab.
+
+The very first publish creates the project and "claims" the trusted publisher; the pending publisher
+becomes a normal one automatically.
