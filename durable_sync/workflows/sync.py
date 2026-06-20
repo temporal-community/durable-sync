@@ -146,12 +146,15 @@ class SourceSyncWorkflow:
     def set_interval(self, minutes: int) -> None:
         self._state.spec.interval_minutes = minutes
 
+    # *_ absorbs a stray signal payload (e.g. `--input '[]'`). A signal handler
+    # that raises POISONS the workflow task (it re-fails forever), so no-arg
+    # signals must tolerate an unexpected arg rather than throw.
     @workflow.signal
-    def pause(self) -> None:
+    def pause(self, *_: object) -> None:
         self._state.paused = True
 
     @workflow.signal
-    def resume(self) -> None:
+    def resume(self, *_: object) -> None:
         self._state.paused = False
         self._sync_requested = True  # catch up immediately on resume
 
