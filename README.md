@@ -41,7 +41,7 @@ Asana destination uses plain REST + a self-serve token to prove it.
 
 ```bash
 pip install "durable-sync[notion]"     # destination extras: notion / asana
-pip install "durable-sync[github]"     # source extras
+pip install "durable-sync[github]"     # source extras: github / luma / youtube / contentful
 pip install "durable-sync[crypto]"     # opt-in AES-GCM payload encryption
 pip install "durable-sync[all,dev]"    # everything + tests
 ```
@@ -59,8 +59,14 @@ durable_sync/
 ├── config.py           runtime/connection config
 ├── temporal_client.py  client with the codec wired in
 ├── auth/oauth/         OAuth-as-a-workflow toolkit (token-owner workflow + flow)
+├── http.py             shared httpx retry/backoff for REST sources & destinations
 ├── sources/
-│   └── github/         orgs + named repos -> Records, with an enrichment hook
+│   ├── content.py      shared neutral column vocabulary for content-style sources
+│   ├── multi.py        MultiSource — fan several sources onto one worker/bootstrap
+│   ├── github/         orgs + named repos -> Records, with an enrichment hook
+│   ├── luma/           Luma calendar events (+ host context for the enrich hook)
+│   ├── youtube/        a channel's uploads (inverted-match scan text for enrich)
+│   └── contentful/     entries by content type (CDA preferred, CMA fallback)
 └── destinations/
     ├── notion/         MCP transport + workflow-owned OAuth
     └── asana/          direct REST + self-serve PAT
@@ -75,7 +81,9 @@ durable_sync/
 - [x] Notion destination (workflow-owned OAuth, Bearer transport, 429 backoff, pacing)
 - [x] Asana destination (REST + self-serve PAT)
 - [x] GitHub source (parameterized orgs/repos, with an enrichment hook)
-- [x] Tests (offline spine smoke via `MemoryDestination`, Asana encode unit tests, live smokes)
+- [x] Luma / YouTube / Contentful sources (events / videos / CMS entries — async httpx, shared backoff)
+- [x] `MultiSource` (run several sources on one worker) + shared content-column vocabulary
+- [x] Tests (offline spine smoke via `MemoryDestination`, encode + normalizer unit tests, live smokes)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) to add your own source / destination / auth / transformation.
 

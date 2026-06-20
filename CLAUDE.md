@@ -109,8 +109,27 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
   untouched, so hand-added metadata and out-of-scope rows survive.
 - **Records pass through workflow history** — fine at hundreds; batch if a source grows to many thousands.
 
-## Testing a new destination
+## Sources
 
-It should pass the spine end-to-end via the `MemoryDestination` pattern (`tests/memory_destination.py`
-is a full-protocol, network-free destination; `tests/smoke_spine.py` exercises the whole spine offline)
-and ship a unit test for its Record→wire encoding (see `tests/test_asana_encode.py`).
+`sources/github` is the reference, but `luma`, `youtube`, and `contentful` follow the same shape:
+an injected config dataclass (secrets read from an env var named in the config, never hardcoded), an
+`api.py` of pure async-httpx fetchers + pure transforms, a `source.py` mapping to neutral `Record`s,
+and an optional source-side `enrich` hook handing the app a typed context (raw entry + live client)
+so app policy — e.g. matching authors/hosts to a roster — stays out of the source. All REST fetchers
+go through `http.request_with_retry`. Contentful has two auth modes (CDA delivery token preferred;
+CMA PAT fallback, the only mode that sees drafts), selected by which token env var is set.
+
+The content-style sources (luma/youtube/contentful) share one neutral column vocabulary via
+`sources/content.py` (`content_record(...)` + `P_*` constants) so the names live in one place, not
+copy-pasted per source (GitHub opts out — its columns are repo-specific). `sources/multi.py`'s
+`MultiSource(*sources)` fans several sources onto one worker/bootstrap by namespacing each inner
+spec key as `<source-name>:<key>` and routing `fetch` back by that prefix — use it for a bundle on
+one task queue; use a single source directly otherwise.
+
+## Testing a source / destination
+
+A destination should pass the spine end-to-end via the `MemoryDestination` pattern
+(`tests/memory_destination.py` is a full-protocol, network-free destination; `tests/smoke_spine.py`
+exercises the whole spine offline) and ship a unit test for its Record→wire encoding (see
+`tests/test_asana_encode.py`). A source should unit-test its pure `_to_record` normalizer with no
+network (see `tests/test_{luma,youtube,contentful}_normalize.py`).
