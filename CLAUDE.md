@@ -26,10 +26,15 @@ PYTHONPATH=. python tests/smoke_github.py           # gated on a real token
 python -m durable_sync.codec                        # generate a base64 AES-256 key for DURABLE_SYNC_ENC_KEY
 ```
 
-Notion OAuth is a two-step, run-once setup (no admin token needed — authorizes as an individual):
+OAuth-over-MCP is a two-step, run-once setup per provider (no admin token — authorizes as an
+individual via discovery/PKCE/DCR, then a workflow owns the rotating refresh token). Same flow for
+Notion and Contentful (the binding just pins the MCP base URL + creds file + workflow id):
 ```bash
-PYTHONPATH=. python -m durable_sync.connectors.notion.bootstrap   # interactive: discovery/PKCE/DCR -> saves creds locally
-PYTHONPATH=. python -m durable_sync.connectors.notion.start       # hands the refresh token to OAuthTokenWorkflow
+PYTHONPATH=. python -m durable_sync.connectors.notion.bootstrap      # interactive -> saves creds
+PYTHONPATH=. python -m durable_sync.connectors.notion.start          # hands refresh token to OAuthTokenWorkflow
+# Contentful (e.g. SSO-blocked spaces): same two steps, plus `prove`/`describe` to list MCP tools
+PYTHONPATH=. python -m durable_sync.connectors.contentful.bootstrap
+PYTHONPATH=. python -m durable_sync.connectors.contentful.start
 ```
 
 Drive/inspect a running entity workflow by id:
@@ -130,6 +135,18 @@ copy-pasted per source (GitHub opts out — its columns are repo-specific). `con
 `MultiSource(*sources)` fans several sources onto one worker/bootstrap by namespacing each inner
 spec key as `<source-name>:<key>` and routing `fetch` back by that prefix — use it for a bundle on
 one task queue; use a single source directly otherwise.
+
+## Two write paths for Contentful
+
+`ContentfulDestination` (REST CMA, clean JSON) needs a CMA token. When that's blocked (e.g. the org
+SSO-gates static tokens), `ContentfulMcpDestination` writes over the MCP server with a workflow-owned
+OAuth token instead — same auth toolkit as Notion. Its responses are agent-oriented pseudo-XML, so
+`connectors/contentful/mcp.py` scrapes only the two scalars writes need (entry id from the sys URN,
+`version` for the optimistic-lock update) rather than parsing the document; the field-encoding
+(`encode.py`) is shared with the REST destination. `publish` is optional and tolerant — Contentful's
+MCP *app installation* has its own per-tool permission layer (separate from OAuth scopes), so a
+forbidden `publish_entry` leaves a draft + warning, never fails the row. MCP *reads* are deliberately
+not built (multi-entry XML is fragile) — use the REST source when you have CMA access.
 
 ## Testing a source / destination
 

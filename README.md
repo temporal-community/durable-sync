@@ -58,26 +58,33 @@ durable_sync/
 ├── codec.py            opt-in AES-GCM payload codec
 ├── config.py           runtime/connection config
 ├── temporal_client.py  client with the codec wired in
-├── auth/oauth/         OAuth-as-a-workflow toolkit (token-owner workflow + flow)
+├── auth/oauth/         OAuth-as-a-workflow toolkit (token-owner workflow + flow) — an AUTH mechanism
+├── transport/          how a connector moves calls (orthogonal to auth):
+│   ├── mcp.py          generic Model Context Protocol session (Notion + Contentful)
+│   └── (http.py)       REST connectors use http.py below (move here for symmetry — trivial)
 ├── http.py             shared httpx retry/backoff for REST connectors
 ├── linkstore.py        idempotency map (primary_key <-> dest id) for FK-less destinations
 ├── route.py            Route = source -> (transform, field ownership) -> destination
+├── env.py              load a local .env for scripts/smokes (one shared loader)
 └── connectors/         one subpackage per SYSTEM — source.py and/or destination.py, sharing a client
     ├── content.py      shared neutral column vocabulary for content-style sources
     ├── multi.py        MultiSource — fan several sources onto one worker/bootstrap
     ├── github/         source: orgs + named repos -> Records, with an enrichment hook
-    ├── luma/           source: Luma calendar events (+ host context for the enrich hook)
+    ├── luma/           source + destination: Luma calendar events (REST)
     ├── youtube/        source: a channel's uploads (inverted-match scan text for enrich)
-    ├── contentful/     source: entries by content type (CDA preferred, CMA fallback)
-    ├── notion/         destination: MCP transport + workflow-owned OAuth
+    ├── contentful/     source (REST: CDA/CMA) + destination (REST CMA *or* MCP over OAuth)
+    ├── notion/         source + destination: MCP transport + workflow-owned OAuth
     └── asana/          destination: direct REST + self-serve PAT
 ```
 
 A connector is grouped by *system*, not direction, because a system is often both a
-source and a destination (read in one route, written in another) and its two sides share
-a client + auth. **Notion**, **Luma**, and **Contentful** now expose both halves, each sharing
-one client + auth across its read and write sides. (A system that can't store a foreign key on
-its own objects — Luma, Contentful — takes an app-provided `LinkStore` for idempotency; see the
+source and a destination, and its two sides share a client + auth. A connector composes a
+**transport** (`transport/mcp.py` or `http.py`) with an **auth mechanism** (`auth/oauth/`, or an
+inline PAT) — the two axes are independent. **Notion**, **Luma**, and **Contentful** expose both
+halves. Where a system blocks the easy path, OAuth-as-an-individual over MCP unlocks it: Notion
+(no admin-issued token) and Contentful (static tokens SSO-blocked) both authorize as you and let a
+workflow own the rotating refresh token. (A system that can't store a foreign key on its own
+objects — Luma, Contentful-over-MCP — takes an app-provided `LinkStore` for idempotency; see the
 boundary doctrine in [CONTRIBUTING.md](CONTRIBUTING.md).)
 
 ## What's built
@@ -86,9 +93,11 @@ boundary doctrine in [CONTRIBUTING.md](CONTRIBUTING.md).)
 - [x] Generic activities + entity sync workflow + worker/bootstrap
 - [x] Payload encryption codec
 - [x] OAuth-as-a-workflow toolkit (token-owner workflow, PKCE + dynamic client registration)
-- [x] Notion connector — **source + destination** (workflow-owned OAuth, shared MCP client)
+- [x] `transport/mcp.py` — generic MCP transport (Notion + Contentful), orthogonal to auth
+- [x] Notion connector — **source + destination** (MCP transport + workflow-owned OAuth)
 - [x] Luma connector — **source + destination** (REST; destination uses an app-owned `LinkStore`)
-- [x] Contentful connector — **source + destination** (CDA/CMA read; CMA write, `LinkStore`-keyed)
+- [x] Contentful connector — **source** (REST CDA/CMA) + **destination** (REST CMA *or* MCP-over-OAuth
+      for SSO-blocked spaces; `LinkStore`-keyed, workflow-owned token)
 - [x] Asana destination (REST + self-serve PAT)
 - [x] GitHub / YouTube sources (repos / videos — async httpx, shared backoff)
 - [x] `LinkStore` (in-memory + SQLite) for FK-less idempotency; `Route` + field-ownership (two-way scaffolding)
