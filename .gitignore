@@ -23,4 +23,5 @@ env/
 .ruff_cache/
 .DS_Store
 .contentful_auth.json
+.spotify_auth.json
 mega.json

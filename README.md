@@ -174,6 +174,7 @@ Reuse a built-in connector instead of writing your own. Each lives in
 | **YouTube**   |   ✅   |             | A channel's uploads |
 | **Luma**      |   ✅   |     ✅      | Calendar events (REST); destination needs a `LinkStore` |
 | **Contentful**|   ✅   |     ✅      | REST source (CDA/CMA); destination via REST CMA *or* MCP-over-OAuth for SSO-blocked spaces |
+| **Spotify**   |   ✅   |             | Liked Songs, keyed on ISRC; workflow-owned OAuth (PKCE, no admin token) |
 | **Notion**    |   ✅   |     ✅      | MCP transport + workflow-owned OAuth (no admin token needed) |
 | **Asana**     |        |     ✅      | Direct REST + a self-serve personal token |
 
@@ -211,7 +212,7 @@ independent.
 
 ```bash
 pip install "durable-sync[notion]"     # a destination: notion / asana
-pip install "durable-sync[github]"     # a source: github / luma / youtube / contentful
+pip install "durable-sync[github]"     # a source: github / luma / youtube / contentful / spotify
 pip install "durable-sync[crypto]"     # opt-in AES-GCM payload encryption
 pip install "durable-sync[all,dev]"    # everything + test deps
 ```

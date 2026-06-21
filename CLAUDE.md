@@ -133,7 +133,15 @@ so app policy — e.g. matching authors/hosts to a roster — stays out of the s
 go through `http.request_with_retry`. Contentful has two auth modes (CDA delivery token preferred;
 CMA PAT fallback, the only mode that sees drafts), selected by which token env var is set.
 
-The content-style sources (luma/youtube/contentful) share one neutral column vocabulary via
+`connectors/spotify` is a source too, but differs in two ways worth knowing. (1) Its primary_key is
+the track's **ISRC**, not the Spotify id — the ISRC is the cross-service identity a destination
+(e.g. Apple Music) can resolve, so a Spotify track id would be useless for dedupe. Tracks with no
+ISRC are dropped + logged. (2) Auth is workflow-owned OAuth (the Notion/Contentful `OAuthTokenWorkflow`
+pattern, reused unchanged) rather than an env-var API key — but Spotify has **no DCR/discovery**, so
+its `oauth.py` pins fixed endpoints + the `user-library-read` scope, and the source gets its access
+token from a `token_provider` (default: query the auth workflow) instead of reading a token env var.
+
+The content-style sources (luma/youtube/contentful/spotify) share one neutral column vocabulary via
 `connectors/content.py` (`content_record(...)` + `P_*` constants) so the names live in one place, not
 copy-pasted per source (GitHub opts out — its columns are repo-specific). `connectors/multi.py`'s
 `MultiSource(*sources)` fans several sources onto one worker/bootstrap by namespacing each inner
