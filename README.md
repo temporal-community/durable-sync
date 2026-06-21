@@ -184,6 +184,16 @@ a connector composes a **transport** (MCP or REST/`http.py`) with an **auth
 mechanism** (workflow-owned OAuth, or an inline token) — the two axes are
 independent.
 
+### Example: Spotify Liked Songs → Notion
+
+[`examples/spotify_to_notion.py`](examples/spotify_to_notion.py) is a complete,
+runnable wiring that mirrors your Spotify **Liked Songs** into a Notion database —
+each track keyed on its **ISRC**, so re-runs update rows instead of duplicating, and
+the sync refreshes on its own timer. It needs only free accounts (no paid/Apple
+Developer membership): authorize Spotify and Notion as yourself, point it at a
+database, and run. Setup and the expected Notion schema are documented at the top of
+the file.
+
 ## Key concepts
 
 - **One workflow per source unit.** `Source.specs()` returns a list of

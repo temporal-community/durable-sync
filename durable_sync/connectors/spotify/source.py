@@ -71,6 +71,19 @@ class SpotifySource:
         # One user's Liked Songs = a single unit of work / entity workflow.
         return [SourceSpec(key="liked", interval_minutes=self._config.interval_minutes)]
 
+    # Spotify's access token is owned by an OAuthTokenWorkflow (see token.py), so
+    # the worker must host that workflow + its refresh activity. Expose them here
+    # so the source is self-sufficient — a Spotify->Asana wiring (Asana has no
+    # OAuth aux of its own) still registers them. The worker dedupes by identity,
+    # so a Spotify->Notion wiring registers the shared class only once.
+    def aux_workflows(self) -> list:
+        from durable_sync.auth.oauth.workflow import OAuthTokenWorkflow
+        return [OAuthTokenWorkflow]
+
+    def aux_activities(self) -> list:
+        from durable_sync.auth.oauth.refresh import refresh_oauth_token
+        return [refresh_oauth_token]
+
     async def fetch_page(
         self, spec: SourceSpec, only_items: list[str] | None, cursor: str | None
     ) -> tuple[list[Record], str | None]:
