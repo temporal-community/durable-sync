@@ -112,8 +112,12 @@ def new_state() -> str:
 
 def build_authorize_url(
     authorization_endpoint: str, client_id: str, redirect_uri: str,
-    code_challenge: str, state: str,
+    code_challenge: str, state: str, *, scope: str | None = None,
 ) -> str:
+    """Build the authorization-code+PKCE redirect URL. `scope` is a space-delimited
+    scope string, included only when supplied: the DCR providers (Notion/Contentful)
+    grant scopes at client registration so they omit it, while a manually-registered
+    app (e.g. Spotify, which has no DCR) must request scopes here."""
     from urllib.parse import urlencode
     params = {
         "response_type": "code",
@@ -123,6 +127,8 @@ def build_authorize_url(
         "code_challenge_method": "S256",
         "state": state,
     }
+    if scope:
+        params["scope"] = scope
     return f"{authorization_endpoint}?{urlencode(params)}"
 
 
