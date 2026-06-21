@@ -175,6 +175,7 @@ Reuse a built-in connector instead of writing your own. Each lives in
 | **Luma**      |   ✅   |     ✅      | Calendar events (REST); destination needs a `LinkStore` |
 | **Contentful**|   ✅   |     ✅      | REST source (CDA/CMA); destination via REST CMA *or* MCP-over-OAuth for SSO-blocked spaces |
 | **Spotify**   |   ✅   |             | Liked Songs, keyed on ISRC; workflow-owned OAuth (PKCE, no admin token) |
+| **ListenBrainz**|      |     ✅      | "Loved recordings"; resolves ISRC→MBID via MusicBrainz, cached in a `LinkStore` |
 | **Notion**    |   ✅   |     ✅      | MCP transport + workflow-owned OAuth (no admin token needed) |
 | **Asana**     |        |     ✅      | Direct REST + a self-serve personal token |
 
