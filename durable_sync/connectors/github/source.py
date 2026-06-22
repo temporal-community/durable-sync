@@ -31,14 +31,14 @@ class GitHubConfig:
     """Everything GitHub-specific a deployment supplies.
 
     sources: list of ("org", "name") and/or ("repos", ["owner/repo", ...]).
-      org sources are gated by inclusion_topic (unless it's None / discovery_mode);
+      org sources are gated by inclusion_topics (unless empty / discovery_mode);
       named repos are included by virtue of being named.
     """
     sources: list[tuple[str, Any]]
-    # Include only org repos carrying this GitHub topic. None = no topic gate
-    # (include every non-archived repo). There's no universal default, so set the
-    # topic your org uses to mark in-scope repos.
-    inclusion_topic: str | None = None
+    # Include only org repos carrying ANY of these GitHub topics (OR-gate). Empty
+    # = no topic gate (include every non-archived repo). Accepts any iterable of
+    # topic strings; named-repo sources are always included regardless.
+    inclusion_topics: set[str] = field(default_factory=set)
     discovery_mode: bool = False          # org sweep ignores topic + skips README
     # Orgs whose member logins are surfaced to the enrich hook as RepoContext.members
     # (e.g. to distinguish insiders from outside contributors). The source attaches
@@ -200,10 +200,10 @@ class GitHubSource:
     def _passes_gate(self, repo: dict) -> bool:
         if repo.get("archived"):
             return False
-        if self._config.discovery_mode or self._config.inclusion_topic is None:
+        if self._config.discovery_mode or not self._config.inclusion_topics:
             return True
-        topics = [t.lower() for t in (repo.get("topics") or [])]
-        return self._config.inclusion_topic.lower() in topics
+        topics = {t.lower() for t in (repo.get("topics") or [])}
+        return any(t.lower() in topics for t in self._config.inclusion_topics)
 
     def _base_record(
         self, repo: dict, readme: str | None, lang_bytes: dict[str, int], authors: list[str]

@@ -34,6 +34,7 @@ Issues = "https://github.com/temporal-community/durable-sync/issues"
 # installs the Notion MCP SDK, etc.
 notion = ["mcp>=1.2", "requests>=2.31"]   # Notion destination: MCP transport + pure-HTTP OAuth
 github = ["httpx>=0.27"]                   # GitHub source
+llm = ["anthropic>=0.40"]                  # generic LLM enrichment hook (durable_sync.enrich.llm)
 asana = ["httpx>=0.27"]                    # Asana destination (direct REST + self-serve PAT)
 luma = ["httpx>=0.27"]                      # Luma source (events)
 youtube = ["httpx>=0.27"]                   # YouTube source (channel uploads)

@@ -41,9 +41,11 @@ _MAX_TEXT = 2000           # Notion's hard per-rich_text limit; a longer value i
 # Optional hooks (app-supplied), kept out of the generic core:
 # TokenProvider is imported from client.py (shared with the source).
 # Runs inside the open MCP session before each write — for DESTINATION-SIDE
-# enrichment that must read Notion (e.g. resolving author handles to a relation).
-# Gets the live session + the record; returns the (possibly mutated) record.
-SessionEnrich = Callable[[ClientSession, Record], Awaitable[Record]]
+# enrichment that must read Notion (e.g. resolving author handles to a relation)
+# or that should fire only on first write (e.g. LLM classification seeds).
+# Gets the live session, the record, and `creating` (True on create / False on
+# update); returns the (possibly mutated) record, or None to DROP it.
+SessionEnrich = Callable[[ClientSession, Record, bool], Awaitable["Record | None"]]
 # Maps a record to a page icon (emoji or URL), or None. Keeps Notion's icon
 # concept off the neutral Record.
 IconFor = Callable[[Record], "str | None"]
@@ -166,7 +168,7 @@ class _NotionSession:
         return mapping
 
     async def create(self, record: Record, synced_at: dt.datetime) -> bool:
-        record = await self._maybe_enrich(record)
+        record = await self._maybe_enrich(record, creating=True)
         if record is None:
             return False  # session_enrich dropped it (out of scope)
         page: dict[str, Any] = {"properties": self._encode(record.properties, synced_at)}
@@ -183,7 +185,7 @@ class _NotionSession:
         return True
 
     async def update(self, existing_id: str, record: Record, synced_at: dt.datetime) -> bool:
-        record = await self._maybe_enrich(record)
+        record = await self._maybe_enrich(record, creating=False)
         if record is None:
             return False  # session_enrich dropped it (out of scope)
         # Skip create-only seeds (enrichment) so human edits to them survive;
@@ -204,11 +206,12 @@ class _NotionSession:
         await self._pace()
         return True
 
-    async def _maybe_enrich(self, record: Record) -> Record | None:
+    async def _maybe_enrich(self, record: Record, *, creating: bool) -> Record | None:
         """Run the destination-side enrich hook (if any). It may return None to
-        DROP the record (an out-of-scope filter)."""
+        DROP the record (an out-of-scope filter). `creating` is True on create and
+        False on update, so a hook can fire only on first write."""
         if self._destination._session_enrich is not None:
-            return await self._destination._session_enrich(self._mcp.session, record)
+            return await self._destination._session_enrich(self._mcp.session, record, creating)
         return record
 
     def _icon(self, record: Record) -> str | None:
