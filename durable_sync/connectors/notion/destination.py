@@ -43,9 +43,10 @@ _MAX_TEXT = 2000           # Notion's hard per-rich_text limit; a longer value i
 # Runs inside the open MCP session before each write — for DESTINATION-SIDE
 # enrichment that must read Notion (e.g. resolving author handles to a relation)
 # or that should fire only on first write (e.g. LLM classification seeds).
-# Gets the live session, the record, and `creating` (True on create / False on
-# update); returns the (possibly mutated) record, or None to DROP it.
-SessionEnrich = Callable[[ClientSession, Record, bool], Awaitable["Record | None"]]
+# Gets the live MCP session wrapper (NotionMCP — `.call(name, args) -> str`, so the
+# hook can read the schema / query Notion), the record, and `creating` (True on
+# create / False on update); returns the (possibly mutated) record, or None to DROP.
+SessionEnrich = Callable[[NotionMCP, Record, bool], Awaitable["Record | None"]]
 # Maps a record to a page icon (emoji or URL), or None. Keeps Notion's icon
 # concept off the neutral Record.
 IconFor = Callable[[Record], "str | None"]
@@ -211,7 +212,7 @@ class _NotionSession:
         DROP the record (an out-of-scope filter). `creating` is True on create and
         False on update, so a hook can fire only on first write."""
         if self._destination._session_enrich is not None:
-            return await self._destination._session_enrich(self._mcp.session, record, creating)
+            return await self._destination._session_enrich(self._mcp, record, creating)
         return record
 
     def _icon(self, record: Record) -> str | None:
