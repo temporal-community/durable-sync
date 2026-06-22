@@ -108,29 +108,50 @@ def classify(tool: dict[str, Any], meta: dict[str, Any], *,
 
 def make_llm_session_enrich(
     *,
-    tool: dict[str, Any],
+    tool: dict[str, Any] | None = None,
     build_meta: BuildMeta,
-    field_map: dict[str, str],
+    field_map: dict[str, str] | None = None,
     model: str = DEFAULT_MODEL,
     enabled: EnabledFn | None = None,
     create_only: bool = True,
+    spec_builder=None,
 ):
     """Build a NotionDestination `session_enrich(session, record, creating)` hook.
 
-    Classifies via `tool` and writes results into `record.properties` through
-    `field_map` (empty values dropped). Gated to row-create when `create_only`
-    (the default), a no-op when `enabled()` is false or `classify` returns None.
-    Returns the record unchanged in every skip/failure path.
+    Classifies via the tool and writes results into `record.properties` through a
+    `{tool_key: notion_property_name}` map (empty values dropped). Gated to
+    row-create when `create_only` (the default); a no-op when `enabled()` is false
+    or `classify` returns None. Returns the record unchanged on every skip/failure.
+
+    Two ways to supply the tool + field map:
+      * **static** — pass `tool` and `field_map` (vocab fixed in code), or
+      * **dynamic** — pass `spec_builder`, an `async (session) -> (tool, field_map)`
+        invoked once (cached) with the live MCP session. Use it to source the
+        controlled-vocab enums from the destination's *current* schema and to
+        resolve rename-safe column ids to their current names (see
+        `durable_sync.connectors.notion.schema`).
     """
+    cache: dict[str, Any] = {}
+
+    async def _resolve(session):
+        if spec_builder is None:
+            return tool, field_map
+        if "spec" not in cache:
+            cache["spec"] = await spec_builder(session)  # (tool, field_map)
+        return cache["spec"]
+
     async def session_enrich(session, record, creating: bool):
         if enabled is not None and not enabled():
             return record
         if create_only and not creating:
             return record
-        result = classify(tool, build_meta(record), model=model)
+        t, fmap = await _resolve(session)
+        if not t or not fmap:
+            return record
+        result = classify(t, build_meta(record), model=model)
         if result:
             props = record.properties if record.properties is not None else {}
-            for key, prop_name in field_map.items():
+            for key, prop_name in fmap.items():
                 value = result.get(key)
                 if value:
                     props[prop_name] = value
