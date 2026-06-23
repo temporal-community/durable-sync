@@ -136,6 +136,7 @@ class _NotionSession:
         self._mcp = session
         self._destination = destination
         self._ds = data_source_id          # already resolved (database id -> data source id)
+        self._known_props: set[str] | None = None   # cached column names (schema-aware write filter)
 
     async def call(self, name: str, arguments: dict[str, Any]) -> str:
         return await self._mcp.call(name, arguments)
@@ -172,7 +173,7 @@ class _NotionSession:
         record = await self._maybe_enrich(record, creating=True)
         if record is None:
             return False  # session_enrich dropped it (out of scope)
-        page: dict[str, Any] = {"properties": self._encode(record.properties, synced_at)}
+        page: dict[str, Any] = {"properties": self._encode(await self._drop_unknown(record.properties), synced_at)}
         if record.body:
             page["content"] = record.body[:_MAX_BODY]
         icon = self._icon(record)
@@ -198,7 +199,7 @@ class _NotionSession:
         args: dict[str, Any] = {
             "page_id": existing_id,
             "command": "update_properties",
-            "properties": self._encode(props, synced_at),
+            "properties": self._encode(await self._drop_unknown(props), synced_at),
         }
         icon = self._icon(record)
         if icon:
@@ -214,6 +215,28 @@ class _NotionSession:
         if self._destination._session_enrich is not None:
             return await self._destination._session_enrich(self._mcp, record, creating)
         return record
+
+    async def _known_property_names(self) -> set[str]:
+        """Column names currently on the data source (fetched once, cached). Used to
+        drop record properties with no matching column, so a write never 400s because
+        the app emits a field the human-curated schema doesn't have (or renamed/
+        removed). Empty set = schema unreadable -> don't filter (write everything)."""
+        if self._known_props is None:
+            from durable_sync.connectors.notion.schema import parse_data_source_state
+            try:
+                raw = await self.call("notion-fetch", {"id": f"collection://{self._ds}"})
+                self._known_props = set(parse_data_source_state(raw).keys())
+            except Exception:
+                self._known_props = set()
+        return self._known_props
+
+    async def _drop_unknown(self, properties: dict[str, Any]) -> dict[str, Any]:
+        """Keep only properties that map to a real column (synced_property is added
+        by _encode, so it doesn't need to be present here)."""
+        known = await self._known_property_names()
+        if not known:
+            return properties
+        return {k: v for k, v in properties.items() if k in known}
 
     def _icon(self, record: Record) -> str | None:
         fn = self._destination._icon_for

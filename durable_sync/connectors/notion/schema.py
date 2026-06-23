@@ -36,11 +36,21 @@ def parse_data_source_state(result: Any) -> dict[str, dict]:
     it is None for option-less types (text / number / date), which can't be
     rename-anchored and must be matched by name.
     """
+    # The transport may hand us the tool result as a JSON *string* with a "text"
+    # field (the inner state JSON escaped inside it) — json-decode it so the inner
+    # <data-source-state> un-escapes before we regex it. Also accept an already-
+    # parsed dict (claude.ai connector) or a state dict directly.
+    obj: Any = result
+    if isinstance(obj, str):
+        try:
+            obj = json.loads(obj)
+        except (json.JSONDecodeError, ValueError):
+            obj = result  # not JSON -> treat as raw text below
     state: dict = {}
-    if isinstance(result, dict) and "schema" in result:
-        state = result
+    if isinstance(obj, dict) and "schema" in obj:
+        state = obj
     else:
-        text = result.get("text", "") if isinstance(result, dict) else str(result)
+        text = obj.get("text", "") if isinstance(obj, dict) else str(obj)
         m = _STATE.search(text)
         if m:
             try:
