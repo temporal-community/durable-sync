@@ -40,6 +40,10 @@ class GitHubConfig:
     # topic strings; named-repo sources are always included regardless.
     inclusion_topics: set[str] = field(default_factory=set)
     discovery_mode: bool = False          # org sweep ignores topic + skips README
+    # Repos to ALWAYS skip, regardless of topic/named gates (e.g. org meta-repos like
+    # `.github`). Match by full "owner/repo" OR by bare repo name — so `.github` drops
+    # every org's meta-repo at once. Case-insensitive.
+    exclude_repos: set[str] = field(default_factory=set)
     # Orgs whose member logins are surfaced to the enrich hook as RepoContext.members
     # (e.g. to distinguish insiders from outside contributors). The source attaches
     # the set; YOUR hook decides what membership means.
@@ -190,14 +194,23 @@ class GitHubSource:
         repos: list[dict] = []
         for full in names:
             repo = await api.get_repo(client, full, headers)
-            if repo is None:
+            if repo is None or self._excluded(repo):
                 continue
             if gate and not self._passes_gate(repo):
                 continue
             repos.append(repo)
         return repos
 
+    def _excluded(self, repo: dict) -> bool:
+        """True if this repo is on the always-skip list (by full name or bare name)."""
+        ex = {e.lower() for e in self._config.exclude_repos}
+        if not ex:
+            return False
+        return (repo.get("full_name") or "").lower() in ex or (repo.get("name") or "").lower() in ex
+
     def _passes_gate(self, repo: dict) -> bool:
+        if self._excluded(repo):
+            return False
         if repo.get("archived"):
             return False
         if self._config.discovery_mode or not self._config.inclusion_topics:
