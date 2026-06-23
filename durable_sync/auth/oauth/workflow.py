@@ -66,6 +66,11 @@ class OAuthTokenWorkflow:
     def __init__(self, params: AuthParams) -> None:
         self._access_token = params.access_token
         self._refresh_token = params.refresh_token
+        # client_id / token_endpoint are mutable state (not read from `params`) so a
+        # re-bootstrap that mints a NEW OAuth client can be healed via `reauthorize`
+        # too — not just a fresh refresh token under the same client.
+        self._client_id = params.client_id
+        self._token_endpoint = params.token_endpoint
         self._refreshes = params.refreshes_so_far
         # Pause/recover state (mirrors SourceSyncWorkflow) — a dead refresh token
         # parks the workflow instead of crashing it, so it stays queryable and is
@@ -73,7 +78,10 @@ class OAuthTokenWorkflow:
         self._paused = False
         self._last_error: str | None = None
         self._last_refresh: str | None = None
-        self._new_refresh_token = ""  # supplied by reauthorize after a re-bootstrap
+        # Supplied by reauthorize after a re-bootstrap; applied on resume.
+        self._new_refresh_token = ""
+        self._new_client_id = ""
+        self._new_token_endpoint = ""
 
     @workflow.run
     async def run(self, params: AuthParams) -> None:
@@ -82,8 +90,8 @@ class OAuthTokenWorkflow:
                 out: RefreshOutput = await workflow.execute_activity(
                     refresh_oauth_token,
                     RefreshInput(
-                        client_id=params.client_id,
-                        token_endpoint=params.token_endpoint,
+                        client_id=self._client_id,
+                        token_endpoint=self._token_endpoint,
                         refresh_token=self._refresh_token,
                     ),
                     start_to_close_timeout=timedelta(seconds=30),
@@ -97,18 +105,25 @@ class OAuthTokenWorkflow:
                     self._paused = True
                     workflow.logger.error(
                         "OAuth refresh permanently rejected for %s — pausing until "
-                        "`reauthorize` with a fresh refresh token.", params.client_id,
+                        "`reauthorize` with a fresh refresh token.", self._client_id,
                     )
                     await workflow.wait_condition(lambda: not self._paused)
+                    # Apply anything reauthorize handed us (token and/or a new client).
                     if self._new_refresh_token:
                         self._refresh_token = self._new_refresh_token
                         self._new_refresh_token = ""
+                    if self._new_client_id:
+                        self._client_id = self._new_client_id
+                        self._new_client_id = ""
+                    if self._new_token_endpoint:
+                        self._token_endpoint = self._new_token_endpoint
+                        self._new_token_endpoint = ""
                 else:
                     # Transient (endpoint down, network) — back off and retry rather
                     # than terminating the only source of access tokens.
                     workflow.logger.warning(
                         "OAuth refresh transient failure for %s; retrying after backoff.",
-                        params.client_id,
+                        self._client_id,
                     )
                     await workflow.sleep(_TRANSIENT_BACKOFF)
                 continue
@@ -133,8 +148,8 @@ class OAuthTokenWorkflow:
                 await workflow.wait_condition(workflow.all_handlers_finished)
                 workflow.continue_as_new(
                     AuthParams(
-                        client_id=params.client_id,
-                        token_endpoint=params.token_endpoint,
+                        client_id=self._client_id,
+                        token_endpoint=self._token_endpoint,
                         refresh_token=self._refresh_token,
                         refreshes_so_far=0,
                         access_token=self._access_token,
@@ -144,12 +159,19 @@ class OAuthTokenWorkflow:
     # --- Signals (flip flags only; non-async; tolerate stray payloads) -------
 
     @workflow.signal
-    def reauthorize(self, refresh_token: str = "", *_: object) -> None:
+    def reauthorize(self, refresh_token: str = "", client_id: str = "",
+                    token_endpoint: str = "", *_: object) -> None:
         """Resume after a pause. Pass a fresh refresh token (from re-running the
         provider's bootstrap) when the old one was revoked/expired; a bare signal
-        just retries with the current token (e.g. to recover from a long outage)."""
+        just retries with the current token (e.g. to recover from a long outage).
+        Also pass client_id / token_endpoint if the re-bootstrap minted a NEW OAuth
+        client — so an app change heals via signal too, no re-seed needed."""
         if refresh_token:
             self._new_refresh_token = refresh_token
+        if client_id:
+            self._new_client_id = client_id
+        if token_endpoint:
+            self._new_token_endpoint = token_endpoint
         self._paused = False
 
     # --- Queries (read-only) -------------------------------------------------
