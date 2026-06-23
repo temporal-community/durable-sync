@@ -183,6 +183,7 @@ class _NotionSession:
             "notion-create-pages",
             {"parent": {"data_source_id": self._ds}, "pages": [page]},
         )
+        print(f"  + created {record.properties.get(self._destination.title_property, '?')}")
         await self._pace()
         return True
 
@@ -205,6 +206,7 @@ class _NotionSession:
         if icon:
             args["icon"] = icon
         await self.call("notion-update-page", args)
+        print(f"  ~ updated {record.properties.get(self._destination.title_property, '?')}")
         await self._pace()
         return True
 
