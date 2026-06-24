@@ -89,6 +89,13 @@ def row_columns(row: dict[str, Any]) -> dict[str, Any]:
 _COLLECTION_RE = re.compile(r"collection://([0-9a-f-]{32,36})")
 
 
+def collection_id_from_text(text: str) -> str | None:
+    """Pull the first `collection://<uuid>` data source id out of an MCP result
+    (e.g. a `notion-create-database` response). None if there isn't one."""
+    m = _COLLECTION_RE.search(text or "")
+    return m.group(1) if m else None
+
+
 async def resolve_data_source_id(session: NotionMCP, id_or_url: str) -> str:
     """Resolve a database id/URL (or a data source id / collection URL) to the data
     source id the query & create tools need. Best-effort and SAFE: a collection://

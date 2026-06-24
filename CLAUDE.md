@@ -75,6 +75,11 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
   `requests`-based OAuth refresh) can run.
 - **`bootstrap.py`** — `start_sources(SOURCE)` starts one workflow per `spec` with id
   `durable-sync:<spec.key>` using `USE_EXISTING`, so it's idempotent and doubles as a reconcile.
+- **`schema.py` + `bootstrap_schema.py`** — optional schema generation. `schema.infer_schema(...)`
+  maps a sample of `Record`s to a neutral `Schema` (generic + pure); a destination materializes it
+  via the optional `ensure_schema(schema)` hook (Notion → `CREATE TABLE` via `connectors/notion/
+  ddl.py`; others omit it). `bootstrap_schema` is the generic CLI front door. **Create-only** —
+  inference is generic, materialization is per-destination, and an existing schema is never touched.
 - **`transport/`** — transport mechanisms, orthogonal to `auth/`: `transport/mcp.py` is the generic
   MCP session/`call`/tool-listing over streamable-HTTP (Notion + Contentful both ride it — its
   second consumer is why it was promoted out of `connectors/notion`); REST connectors use `http.py`.

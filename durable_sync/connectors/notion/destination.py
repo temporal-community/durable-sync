@@ -110,6 +110,33 @@ class NotionDestination:
                 ds = await mcp.resolve_data_source_id(session, ds)
             yield _NotionSession(session, self, data_source_id=ds)
 
+    async def ensure_schema(self, schema) -> str | None:
+        """Layer-2 schema generation. CREATE-ONLY: if a `data_source_id` is already
+        configured, leave the live schema untouched and return None (the write path
+        already drops unknown columns, so drift is safe). Otherwise materialize the
+        neutral `Schema` as a `CREATE TABLE` DDL, create the database via MCP, set
+        `self.data_source_id` to the new data source id, and return it.
+
+        Opens its own session (it runs BEFORE a normal sync's `connect()`, which
+        needs the id this produces). Meant for the one-time bootstrap, not the
+        per-sync hot path."""
+        if self.data_source_id:
+            return None
+        from durable_sync.connectors.notion.ddl import schema_to_ddl
+        ddl = schema_to_ddl(schema)
+        title = getattr(schema, "name", None) or "durable-sync"
+        async with mcp.open_session(self._token_provider) as session:
+            res = await session.call(
+                "notion-create-database", {"title": title, "schema": ddl}
+            )
+        ds = mcp.collection_id_from_text(res)
+        if not ds:
+            raise RuntimeError(
+                f"notion-create-database returned no collection id: {res[:300]}"
+            )
+        self.data_source_id = ds
+        return ds
+
     # The worker auto-registers these so the token-owner workflow runs alongside
     # the sync. (Optional hook; destinations without aux work omit it.)
     def aux_workflows(self) -> list:

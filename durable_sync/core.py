@@ -132,6 +132,16 @@ class Destination(Protocol):
     #   def aux_workflows(self) -> list: ...   extra Temporal workflows to register
     #   def aux_activities(self) -> list: ...  extra activities to register
     # e.g. the Notion destination registers its token-owner auth workflow here.
+    #
+    #   async def ensure_schema(self, schema: durable_sync.schema.Schema) -> str | None
+    # Schema generation (Layer 2). Materialize the neutral `Schema` (from
+    # `durable_sync.schema.infer_schema`) into this destination's own vocabulary —
+    # Notion -> a CREATE TABLE database, Contentful -> a content type, etc. Return a
+    # destination handle/id if one was created, else None. CREATE-ONLY by
+    # convention (never drop/alter an existing schema — see "Never auto-delete").
+    # Inference is generic and lives in the spine; only this materialization is
+    # destination-specific, so a destination with no creatable schema (or a fixed
+    # one, like Asana's native fields) simply omits this method.
 
     @property
     def config_hint(self) -> str:

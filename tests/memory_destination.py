@@ -21,6 +21,7 @@ class MemoryDestination:
         # primary_key -> {"properties": {...}, "synced_at": iso, "writes": n}
         self.store: dict[str, dict[str, Any]] = {}
         self.create_only_properties = create_only_properties or set()
+        self.schema: Any = None   # last schema handed to ensure_schema (Layer 2)
 
     configured = True
     config_hint = "(memory destination is always configured)"
@@ -28,6 +29,13 @@ class MemoryDestination:
     @asynccontextmanager
     async def connect(self) -> AsyncIterator["_MemorySession"]:
         yield _MemorySession(self)
+
+    async def ensure_schema(self, schema: Any) -> str | None:
+        """Schema-generation hook. A dict-backed store has no real schema to
+        create, so this just records what it was handed (let tests assert the
+        spine drove it) and returns None — the minimal correct implementation."""
+        self.schema = schema
+        return None
 
     @staticmethod
     def is_auth_error(err: BaseException) -> bool:

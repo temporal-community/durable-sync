@@ -168,6 +168,48 @@ Key contracts:
 - **Optional `aux_workflows()` / `aux_activities()`** — extra Temporal workflows/activities your
   destination needs registered (e.g. an auth workflow). The worker auto-registers them. Omit if
   you don't need any (Asana doesn't).
+- **Optional `ensure_schema(schema)` hook** — schema generation (below). Omit it if your
+  destination has no creatable schema or a fixed one (Asana's native fields).
+
+---
+
+## Generate a destination schema (instead of hand-authoring one)
+
+Rather than hand-building a destination table (a Notion DB, a Contentful content type) and a
+`SCHEMA.md` to document it, you can infer one from a sample of the source's `Record`s. Two layers,
+split along the usual library-owns-mechanism / destination-owns-vocabulary line:
+
+1. **Generic inference (the spine, pure):** `durable_sync.schema.infer_schema(records, *, title,
+   key=, synced=, overrides=, name=) -> Schema` maps neutral `Record` values to a neutral `Schema`
+   (`Column`s with a `Kind` — `TEXT/NUMBER/CHECKBOX/MULTI_SELECT/SELECT/DATE` — and a `Role` —
+   `TITLE/KEY/SYNCED/NORMAL`). `str→TEXT, bool→CHECKBOX, int|float→NUMBER, list→MULTI_SELECT,
+   date(time)→DATE`. `SELECT` is **override-only** (two strings are indistinguishable from free
+   text). All-`None`/mixed columns are skipped or fall back to `TEXT`. Deterministic + unit-tested.
+
+2. **Per-destination materialization (the optional hook):**
+
+   ```python
+   async def ensure_schema(self, schema: durable_sync.schema.Schema) -> str | None:
+       """CREATE-ONLY: if already configured, return None and leave the live schema alone.
+       Otherwise create the table from `schema` and return its new id."""
+   ```
+
+   `NotionDestination.ensure_schema` is the reference: it renders the neutral schema to a
+   `CREATE TABLE (...)` DDL (`connectors/notion/ddl.py::schema_to_ddl`, pure + tested), calls
+   `notion-create-database`, and sets its `data_source_id`. **Create-only by convention** — never
+   drop/alter an existing schema (see "Never auto-delete"); the write path already tolerates drift
+   by dropping unknown columns.
+
+Drive it with the generic CLI (mirrors the OAuth bootstrap — fetches a sample, infers, materializes):
+
+```bash
+PYTHONPATH=. python -m durable_sync.bootstrap_schema \
+    --source myapp.pipeline:SOURCE --destination myapp.pipeline:DESTINATION \
+    --name "GitHub Repos" --override State=SELECT
+```
+
+`--title/--key/--synced` default to the destination's own `title_property`/`key_property`/
+`synced_property`, so usually you only pass `--name` and any `--override NAME=KIND`.
 
 ---
 
@@ -245,6 +287,10 @@ in your app.
   statuses, so it keeps its own small retry loop.)
 - **Determinism:** no clock/IO/randomness in workflows; use `workflow.now()`. All side effects live in
   activities.
+- **Schema generation is create-only and lives in two layers.** Inference (`durable_sync.schema`) is
+  generic and pure; materialization is the per-destination optional `ensure_schema(schema)` hook.
+  Never drop/alter an existing schema (see "Never auto-delete") — a configured destination must
+  no-op and return `None`. Don't put inference in a connector or make the hook required.
 - **Records pass through workflow history** — the spine paginates + chunks (≤`_SYNC_CHUNK_SIZE` per
   upsert) so payloads stay under Temporal's 2MB limit. A small source can just implement `fetch()`
   (one page); a large one should implement the optional `fetch_page(spec, only_items, cursor) ->
