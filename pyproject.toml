@@ -1,6 +1,6 @@
 [project]
 name = "durable-sync"
-version = "0.1.0"
+version = "0.2.0"
 description = "Keep your tools in sync on autopilot — durable, idempotent data sync from any source into any destination, built on Temporal."
 readme = "README.md"
 requires-python = ">=3.11"  # BaseExceptionGroup (auth-error taxonomy) is builtin in 3.11+
