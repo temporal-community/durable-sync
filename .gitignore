@@ -13,9 +13,15 @@ env/
 
 # secrets / local creds
 .env
+.env.*
 .notion-mcp-tokens.json
 .notion_auth.json
 *.tmp
+
+# editor swap/backup files (a .env.swp leaked real tokens into a commit once)
+*.swp
+*.swo
+*~
 
 # tooling
 .pytest_cache/
