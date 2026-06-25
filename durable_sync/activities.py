@@ -27,6 +27,18 @@ FETCH_SOURCE = "fetch_source"
 SYNC_RECORDS = "sync_records"
 
 
+def _unwrap_solo_group(e: BaseException) -> BaseException:
+    """Collapse single-exception ExceptionGroups to their leaf. An error raised
+    inside an `async with httpx.AsyncClient()` / anyio task group surfaces as an
+    `ExceptionGroup`, which Temporal serializes as the opaque 'unhandled errors in
+    a TaskGroup (1 sub-exception)' — losing the real `DestinationHTTPError` (status
+    + body). Unwrapping before re-raising keeps the leaf in workflow history and in
+    the `status` query's `last_error`."""
+    while isinstance(e, BaseExceptionGroup) and len(e.exceptions) == 1:
+        e = e.exceptions[0]
+    return e
+
+
 @dataclass
 class FetchPage:
     """One page of fetched+transformed records, plus the cursor for the NEXT page
@@ -140,14 +152,17 @@ def make_activities(
         except Exception as e:
             # Auth failures are NOT retryable — only a human re-auth fixes them,
             # so the workflow can pause instead of hammering a dead credential.
-            # Everything else stays retryable (transient).
+            # Everything else stays retryable (transient). Unwrap solo ExceptionGroups
+            # so the chained cause is the REAL error (status + body), not the opaque
+            # TaskGroup wrapper — both for the AuthError cause and the re-raise.
+            leaf = _unwrap_solo_group(e)
             if destination.is_auth_error(e):
                 raise ApplicationError(
                     "Destination authorization is no longer valid (token refresh "
                     "failed or was revoked). Re-authorize, then send `resume`.",
                     type="AuthError", non_retryable=True,
-                ) from e
-            raise
+                ) from leaf
+            raise leaf
 
         stats = {"total": len(records), "created": created, "updated": updated, "skipped": skipped}
         activity.logger.info("Sync complete: %s", stats)

@@ -41,6 +41,34 @@ def _is_auth_failure(err: BaseException | None) -> bool:
     return False
 
 
+def _describe_error(err: BaseException | None) -> str:
+    """Flatten an exception — its `__cause__` chain plus any `ExceptionGroup`
+    leaves — into one readable line for `last_error`, so a `status` query surfaces
+    the ROOT cause (e.g. 'Spotify PUT /me/tracks -> 403: Forbidden') instead of the
+    generic top-level 'Activity task failed'. Deterministic (inspects messages/types
+    only), so it is safe to call inside the workflow."""
+    parts: list[str] = []
+
+    def visit(e: BaseException | None, depth: int) -> None:
+        if e is None or depth > 20:
+            return
+        # ApplicationError carries a clean `.message`; fall back to str()/type name.
+        msg = (getattr(e, "message", None) or str(e) or type(e).__name__).strip()
+        if msg and (not parts or parts[-1] != msg):
+            parts.append(msg)
+        for sub in getattr(e, "exceptions", ()) or ():   # ExceptionGroup leaves
+            visit(sub, depth + 1)
+        visit(e.__cause__, depth + 1)
+
+    visit(err, 0)
+    # Drop a leading generic Temporal wrapper once we have something more specific.
+    while len(parts) > 1 and parts[0].lower().rstrip(".") in (
+        "activity task failed", "activity error",
+    ):
+        parts.pop(0)
+    return " ← ".join(parts) if parts else "unknown error"
+
+
 @dataclass
 class SourceState:
     """Everything carried across continue-as-new boundaries."""
@@ -149,7 +177,7 @@ class SourceSyncWorkflow:
             self._last_stats = totals
             self._last_error = None
         except Exception as e:  # noqa: BLE001 - record, don't kill the loop
-            self._last_error = str(e)
+            self._last_error = _describe_error(e)
             if _is_auth_failure(e):
                 # Refresh token revoked/expired -> only a human can fix it. Pause
                 # so the timer loop stops hammering a dead credential; a human

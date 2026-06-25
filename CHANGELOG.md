@@ -7,6 +7,18 @@ backward-incompatible change to it is called out below with a migration note.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- **Error observability:** the `status` query's `last_error` now reports the
+  **root cause** (e.g. `Spotify PUT /me/tracks -> 403: Forbidden`) instead of the
+  generic `Activity task failed`. The workflow flattens the full `__cause__` chain
+  plus `ExceptionGroup` leaves, and `sync_records` unwraps solo `ExceptionGroup`s
+  (from `async with httpx.AsyncClient()` / anyio task groups) so the real
+  `DestinationHTTPError` survives into history instead of being collapsed to
+  "unhandled errors in a TaskGroup". Makes failures self-diagnosing from a single
+  `status` query.
+
 ## [0.3.0]
 
 ### Added
