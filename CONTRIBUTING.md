@@ -93,7 +93,9 @@ class MySource:
   **source-side enrich hook** that hands the app a typed context — see `RepoContext` and
   `GitHubSource(config, enrich=…)`. Don't make the app reach into your private fetchers.
 
-Wire it in your app's `pipeline.py`: `SOURCE = MySource()`.
+Wire it in your app's `pipeline.py`: `SOURCE = MySource()`. To make it
+discoverable by name (and movable between packages without breaking wiring),
+register an entry point — see **Register a connector for discovery** below.
 
 ---
 
@@ -246,6 +248,37 @@ There are **three** transform seams; pick by what context the transform needs:
 All three may be sync or async. Returning `None` (where supported) drops the record — that's how
 you implement filtering. Keep the *mechanism* generic; keep the *policy* (prompts, maps, taxonomies)
 in your app.
+
+---
+
+## Register a connector for discovery
+
+Implementing the protocol is enough to *run* a connector; registering an **entry
+point** makes it discoverable by name and movable between packages (core ↔
+`durable-sync-contrib` ↔ your own repo) without changing any app wiring. Two
+groups — a provider that is both a source and a destination registers in both:
+
+```toml
+[project.entry-points."durable_sync.sources"]
+my-source = "my_pkg.source:MySource"
+
+[project.entry-points."durable_sync.destinations"]
+my-dest = "my_pkg.destination:MyDestination"
+```
+
+After `pip install -e .`, confirm with `python -m durable_sync.registry` (lists
+connectors grouped by providing package). An app then wires by name instead of
+import path:
+
+```python
+from durable_sync.registry import load_source, load_destination
+source = load_source("my-source")()
+destination = load_destination("my-dest")(...config...)
+```
+
+The entry point resolves the **class**; the app supplies config and constructs
+it. See **`CONTRACT.md`** for the versioned import surface you may depend on and
+the core / contrib / not-available curation policy.
 
 ---
 

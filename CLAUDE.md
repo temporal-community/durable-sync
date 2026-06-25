@@ -75,6 +75,13 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
   `requests`-based OAuth refresh) can run.
 - **`bootstrap.py`** — `start_sources(SOURCE)` starts one workflow per `spec` with id
   `durable-sync:<spec.key>` using `USE_EXISTING`, so it's idempotent and doubles as a reconcile.
+- **`registry.py`** — connector discovery via standard entry points (`durable_sync.sources` /
+  `durable_sync.destinations` groups). Apps resolve a connector **by name** (`load_source` /
+  `load_destination`) instead of import path, so a connector can move between core and an out-of-repo
+  `durable-sync-contrib` package without changing wiring. `python -m durable_sync.registry` lists
+  what's installed, grouped by providing package (the core / contrib / not-available model).
+  **`CONTRACT.md` + `core.CONTRACT_VERSION`** document and version the import surface a connector may
+  depend on. This module + its surface are loaded *outside* the workflow sandbox only.
 - **`schema.py` + `bootstrap_schema.py`** — optional schema generation. `schema.infer_schema(...)`
   maps a sample of `Record`s to a neutral `Schema` (generic + pure); a destination materializes it
   via the optional `ensure_schema(schema)` hook (Notion → `CREATE TABLE` via `connectors/notion/

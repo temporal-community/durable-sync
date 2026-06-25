@@ -19,6 +19,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncContextManager, Protocol, runtime_checkable
 
+# Version of the connector contract — the import surface an out-of-repo connector
+# may depend on (this module + `connectors.content`, `auth.oauth`, `http`,
+# `transport`, `schema`). Bump on any breaking change to that surface so contrib
+# packages can pin a floor; see CONTRACT.md for the policy and changelog.
+CONTRACT_VERSION = 1
+
 
 @dataclass
 class Record:
