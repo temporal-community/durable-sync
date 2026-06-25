@@ -1,6 +1,6 @@
 [project]
 name = "durable-sync"
-version = "0.2.0"
+version = "0.3.0"
 description = "Keep your tools in sync on autopilot — durable, idempotent data sync from any source into any destination, built on Temporal."
 readme = "README.md"
 requires-python = ">=3.11"  # BaseExceptionGroup (auth-error taxonomy) is builtin in 3.11+
@@ -40,10 +40,31 @@ luma = ["httpx>=0.27"]                      # Luma source (events)
 jira = ["httpx>=0.27"]                       # Jira source + destination (issues; REST + email/API-token Basic)
 youtube = ["httpx>=0.27"]                   # YouTube source (channel uploads)
 contentful = ["httpx>=0.27"]                # Contentful source (CDA/CMA)
-spotify = ["httpx>=0.27", "requests>=2.31"] # Spotify source (Liked Songs; requests for OAuth bootstrap)
 crypto = ["cryptography>=42"]              # opt-in payload encryption codec
 dev = ["pytest>=8.0", "python-dotenv>=1.0"]
 all = ["mcp>=1.2", "requests>=2.31", "httpx>=0.27", "cryptography>=42"]
+
+# Connector discovery (issue #10). Apps resolve a connector by NAME via
+# durable_sync.registry, never by import path — so a connector can move between
+# core and an out-of-repo durable-sync-contrib package without breaking wiring.
+# Each entry point resolves directly to a Source/Destination class. A provider
+# that is both registers in both groups (Jira/Notion/Luma); one that ships two
+# destinations registers both (Contentful: REST CMA + MCP).
+[project.entry-points."durable_sync.sources"]
+github = "durable_sync.connectors.github.source:GitHubSource"
+notion = "durable_sync.connectors.notion.source:NotionSource"
+luma = "durable_sync.connectors.luma.source:LumaSource"
+youtube = "durable_sync.connectors.youtube.source:YouTubeSource"
+contentful = "durable_sync.connectors.contentful.source:ContentfulSource"
+jira = "durable_sync.connectors.jira.source:JiraSource"
+
+[project.entry-points."durable_sync.destinations"]
+notion = "durable_sync.connectors.notion.destination:NotionDestination"
+asana = "durable_sync.connectors.asana.destination:AsanaDestination"
+luma = "durable_sync.connectors.luma.destination:LumaDestination"
+contentful = "durable_sync.connectors.contentful.destination:ContentfulDestination"
+contentful-mcp = "durable_sync.connectors.contentful.mcp_destination:ContentfulMcpDestination"
+jira = "durable_sync.connectors.jira.destination:JiraDestination"
 
 [build-system]
 requires = ["setuptools>=77"]  # PEP 639 SPDX license expression + license-files
