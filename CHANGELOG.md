@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`build_authorize_url(..., extra_params=...)`** — lets a connector add provider-
+  specific authorize params. Load-bearing case: Spotify's `show_dialog=true`, which
+  forces the consent screen so re-authorizing to ADD a scope isn't silently served
+  the old cached grant.
+
 ### Changed
 - **Error observability:** the `status` query's `last_error` now reports the
   **root cause** (e.g. `Spotify PUT /me/tracks -> 403: Forbidden`) instead of the
@@ -18,6 +24,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/).
   `DestinationHTTPError` survives into history instead of being collapsed to
   "unhandled errors in a TaskGroup". Makes failures self-diagnosing from a single
   `status` query.
+
+### Docs
+- Documented operational gotchas surfaced building a second route (CONTRIBUTING.md +
+  CLAUDE.md): **one task queue per route** (shared queues cross-wire `sync_records`),
+  **workflow-owned-OAuth connectors must register the token workflow as `aux`** to be
+  self-contained, **re-auth-to-add-a-scope must force consent**, and **scope
+  `is_auth_error` to the credential a human can actually re-authorize** (a secondary
+  service's 401/403 shouldn't pause the workflow).
 
 ## [0.3.0]
 

@@ -134,6 +134,13 @@ Source.fetch(spec) ─► [Record, …] ─► (transform) ─► Destination up
   `Source.fetch_page(...)` to bound the fetch too; small ones just implement `fetch()`.
 - **Long-lived workflows + redeploys:** changing a run-loop's command shape breaks replay of in-flight
   histories. Guard with `workflow.patched(...)` or opt into Worker Versioning via `DURABLE_SYNC_BUILD_ID`.
+- **One task queue per route.** `make_activities` closes over one `(source, destination)` and registers
+  `sync_records` under a stable name, so two routes on the *same* task queue let Temporal dispatch one
+  route's upsert to the other's worker (writes hit the wrong destination / fail its auth). Give each
+  route its own `DURABLE_SYNC_TASK_QUEUE`. A connector with workflow-owned OAuth must also expose
+  `aux_workflows()`/`aux_activities()` (the `OAuthTokenWorkflow` + refresh) so it's self-contained on
+  its own queue — not reliant on another worker hosting the token workflow. (Both learned the hard way
+  bringing up a second route; full writeup in CONTRIBUTING.md gotchas.)
 
 ## Sources
 

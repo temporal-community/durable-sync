@@ -341,6 +341,38 @@ depend on.
   runs leave it unset and stay unversioned.
 - **Never auto-delete.** Sync only ever creates/updates rows it fetched; rows it didn't fetch are left
   untouched (so hand-added metadata and out-of-scope rows survive).
+- **One task queue per route.** `make_activities` closes over a single `(source, destination)` and the
+  activities register under *stable names* (`sync_records`). Run two routes (different wirings) on the
+  **same** task queue and Temporal will dispatch one route's `sync_records` to the *other* route's
+  worker — so upserts land in the wrong destination, or fail its auth. Give every route its own
+  `DURABLE_SYNC_TASK_QUEUE`. (Learned live: a Notion worker sharing the default queue silently stole a
+  Spotify→ListenBrainz route's upserts and 403'd them as *Notion* auth — baffling until you spot the
+  cross-wiring.)
+- **A connector with workflow-owned OAuth must register it as `aux`.** Expose
+  `aux_workflows() -> [OAuthTokenWorkflow]` and `aux_activities() -> [refresh_oauth_token]` (see
+  `NotionDestination`) so *any* worker running the connector also **hosts and serves** its own auth
+  workflow. Skip it and the connector silently depends on some *other* worker happening to register
+  `OAuthTokenWorkflow` on a shared queue — which evaporates the instant you isolate the route onto its
+  own task queue (above), orphaning the token the source/destination queries. (Spotify's source missed
+  this; it only "worked" because a Notion worker happened to be hosting `OAuthTokenWorkflow` on the
+  shared queue.)
+- **Re-authorizing to ADD a scope must force a fresh consent.** OAuth providers reuse a cached grant on
+  re-auth and reissue the **old** scopes, so a newly-requested scope silently never takes effect. Pass
+  a force-consent param via `build_authorize_url(..., extra_params=...)` — for Spotify, `show_dialog=true`.
+  And know the failure modes around it: a provider can put a scope in the granted-scope *string* yet
+  still 403 the operation if the app's quota mode / user allowlist gates it (Spotify "Development mode"
+  + "User Management") — reads-OK-but-writes-403 with the scope present ⇒ that's a *platform setting*,
+  not a connector bug.
+- **Scope `is_auth_error` to the credential a human can actually re-authorize.** A destination that
+  calls a *secondary* service (e.g. a metadata API like MusicBrainz) can have that service's transient
+  `401/403` walked up the chain and classified as a re-authable `AuthError`, pausing the workflow on a
+  failure no re-auth will fix. Match only the auth-bearing service (check the host/URL, or raise a
+  distinct exception type for the secondary call) so a flaky dependency doesn't masquerade as a dead
+  credential.
+- **Make failures self-diagnosing.** The `status` query's `last_error` reports the flattened root cause
+  (cause chain + `ExceptionGroup` leaves), and `sync_records` unwraps solo `ExceptionGroup`s so the real
+  `DestinationHTTPError` survives into history — so prefer `temporal workflow query --type status` over
+  spelunking `workflow show` JSON. Raise informative `DestinationHTTPError(status, "<service> <verb> <path> -> <code>: <body[:600]>")` so that one line tells the whole story.
 
 ## Scaling (and when to reach past the built-in paging)
 
