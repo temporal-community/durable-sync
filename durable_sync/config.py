@@ -33,6 +33,3 @@ NOTION_AUTH_WORKFLOW_ID = os.environ.get(
 CONTENTFUL_AUTH_WORKFLOW_ID = os.environ.get(
     "DURABLE_SYNC_CONTENTFUL_AUTH_WORKFLOW_ID", "durable-sync:contentful-auth"
 )
-SPOTIFY_AUTH_WORKFLOW_ID = os.environ.get(
-    "DURABLE_SYNC_SPOTIFY_AUTH_WORKFLOW_ID", "durable-sync:spotify-auth"
-)

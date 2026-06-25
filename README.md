@@ -174,7 +174,7 @@ Reuse a built-in connector instead of writing your own. Each lives in
 | **YouTube**   |   ✅   |             | A channel's uploads |
 | **Luma**      |   ✅   |     ✅      | Calendar events (REST); destination needs a `LinkStore` |
 | **Contentful**|   ✅   |     ✅      | REST source (CDA/CMA); destination via REST CMA *or* MCP-over-OAuth for SSO-blocked spaces |
-| **Spotify**   |   ✅   |             | Liked Songs, keyed on ISRC; workflow-owned OAuth (PKCE, no admin token) |
+| **Jira**      |   ✅   |     ✅      | Issues via JQL (REST + email/API-token Basic); both seams in one connector |
 | **Notion**    |   ✅   |     ✅      | MCP transport + workflow-owned OAuth (no admin token needed) |
 | **Asana**     |        |     ✅      | Direct REST + a self-serve personal token |
 
@@ -183,6 +183,13 @@ a source and a destination and the two sides share a client + auth. Under the ho
 a connector composes a **transport** (MCP or REST/`http.py`) with an **auth
 mechanism** (workflow-owned OAuth, or an inline token) — the two axes are
 independent.
+
+Connectors are discovered by name via entry points (`durable_sync.registry`), so they
+can live **in core** (above), **in
+[`durable-sync-contrib`](https://github.com/temporal-community/durable-sync-contrib)**
+(off-domain/experimental — Spotify, ListenBrainz), or **in your own package** —
+apps wire them identically with `load_source(...)` / `load_destination(...)`. See
+[CONTRACT.md](CONTRACT.md).
 
 ## Key concepts
 
@@ -212,9 +219,11 @@ independent.
 
 ```bash
 pip install "durable-sync[notion]"     # a destination: notion / asana
-pip install "durable-sync[github]"     # a source: github / luma / youtube / contentful / spotify
+pip install "durable-sync[github]"     # a source: github / luma / youtube / contentful
+pip install "durable-sync[jira]"       # a source + destination
 pip install "durable-sync[crypto]"     # opt-in AES-GCM payload encryption
 pip install "durable-sync[all,dev]"    # everything + test deps
+pip install durable-sync-contrib       # off-domain connectors (Spotify, ListenBrainz)
 ```
 
 ## Configuration

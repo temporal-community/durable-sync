@@ -15,8 +15,11 @@ from durable_sync import registry
 def test_known_sources_and_destinations_are_registered():
     sources = set(registry.source_names())
     destinations = set(registry.destination_names())
-    # A representative slice of the in-repo connectors (full set asserted via discover()).
-    assert {"github", "notion", "jira", "spotify"} <= sources
+    # A representative slice of the in-repo (core) connectors. We assert only that
+    # core's own connectors are present, never that others are ABSENT: off-domain
+    # connectors (spotify, listenbrainz) live in durable-sync-contrib, and whether
+    # they're discoverable depends on whether that package is also installed.
+    assert {"github", "notion", "jira", "youtube", "contentful"} <= sources
     assert {"notion", "asana", "jira", "contentful", "contentful-mcp"} <= destinations
 
 

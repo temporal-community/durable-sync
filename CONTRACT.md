@@ -74,10 +74,12 @@ connector; we changelog any breaking change and bump `CONTRACT_VERSION`.
 | `durable_sync.http` | `request_with_retry` (Retry-After / 429 / rate-limited-403 backoff) for REST connectors |
 | `durable_sync.transport.mcp` | generic MCP session/call/tool-listing over streamable-HTTP |
 | `durable_sync.schema` | `infer_schema` + the neutral `Schema` types for the optional `ensure_schema` hook |
+| `durable_sync.linkstore` | `LinkStore` (+ `InMemoryLinkStore` / `SqliteLinkStore`) for destinations that must store their own `primary_key → external id` map (ListenBrainz, Luma, Contentful) |
 | `durable_sync.registry` | discovery (`load_source`, `load_destination`, `discover`) |
+| `durable_sync.temporal_client` + `durable_sync.config` | **operational surface for a connector's `bootstrap`/`start` CLIs only** — `connect()` and the env-var reader. A connector's Source/Destination *classes* do not depend on these. |
 
 Anything **not** in this table (the spine internals — `activities`, `workflows`,
-`worker`, `bootstrap`, `temporal_client`, `codec`, `config`) is not part of the
+`worker`, `bootstrap`, `codec`) is not part of the
 contract and may change without a version bump. Connectors are wired *into* those
 by the app; they don't import them.
 
