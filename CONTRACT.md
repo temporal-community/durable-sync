@@ -101,12 +101,9 @@ workflows and out-of-repo connectors both need a stable thing to stand on.
 
 ## Writing a connector in your own repo
 
-1. Implement `Source` and/or `Destination` from `durable_sync.core` (see
-   `CONTRIBUTING.md` for signatures and the hard-won gotchas — keep
-   `__init__.py` import-free, delegate `is_auth_error` to `auth_error_in_chain`,
-   route HTTP through `request_with_retry`, etc.).
-2. Declare entry points in your `pyproject.toml` under `durable_sync.sources` /
-   `durable_sync.destinations`.
-3. `pip install -e .` and confirm `python -m durable_sync.registry` lists you
-   under your distribution.
-4. An app installs your package alongside `durable-sync` and wires you by name.
+A connector can live in core, in `durable-sync-contrib`, or in **your own package
+— including a private, in-house one you never publish**. All three register the
+same way (entry points); the only difference is which distribution ships them.
+See **[`CONNECTORS.md`](CONNECTORS.md)** for the full walkthrough, the
+private/in-house path (private index / git URL / monorepo install), and how name
+collisions resolve.

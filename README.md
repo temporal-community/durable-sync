@@ -187,9 +187,10 @@ independent.
 Connectors are discovered by name via entry points (`durable_sync.registry`), so they
 can live **in core** (above), **in
 [`durable-sync-contrib`](https://github.com/temporal-community/durable-sync-contrib)**
-(off-domain/experimental — Spotify, ListenBrainz), or **in your own package** —
-apps wire them identically with `load_source(...)` / `load_destination(...)`. See
-[CONTRACT.md](CONTRACT.md).
+(off-domain/experimental — Spotify, ListenBrainz), or **in your own package**
+(including a private, in-house one) — apps wire them identically with
+`load_source(...)` / `load_destination(...)`. See **[CONNECTORS.md](CONNECTORS.md)**
+for all three paths and [CONTRACT.md](CONTRACT.md) for the versioned surface.
 
 ## Key concepts
 

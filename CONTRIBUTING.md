@@ -277,8 +277,10 @@ destination = load_destination("my-dest")(...config...)
 ```
 
 The entry point resolves the **class**; the app supplies config and constructs
-it. See **`CONTRACT.md`** for the versioned import surface you may depend on and
-the core / contrib / not-available curation policy.
+it. A connector can live in core, in `durable-sync-contrib`, or in **your own
+(even private, in-house) package** — see **[`CONNECTORS.md`](CONNECTORS.md)** for
+all three paths, and **`CONTRACT.md`** for the versioned import surface you may
+depend on.
 
 ---
 
