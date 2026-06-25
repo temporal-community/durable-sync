@@ -101,7 +101,9 @@ Wire it in your app's `pipeline.py`: `SOURCE = MySource()`.
 
 Implement `Destination` + `DestinationSession` (`durable_sync/core.py`). References:
 `connectors/notion` (MCP + workflow-owned OAuth) and `connectors/asana` (REST + PAT) — two
-deliberately different transports/auth, proving the protocol is neither.
+deliberately different transports/auth, proving the protocol is neither. `connectors/jira` is a
+second example of the Asana shape (REST + self-serve token, `field_map`, FK-on-the-record
+idempotency) — and, like `connectors/luma`, ships a Source *and* a Destination in one connector.
 
 ```python
 from contextlib import asynccontextmanager
